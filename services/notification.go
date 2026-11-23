@@ -2,50 +2,184 @@ package services
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"regexp"
 
+	"9itchi-notification-api/core"
 	"9itchi-notification-api/models"
 	"9itchi-notification-api/models/api"
+	"9itchi-notification-api/models/db"
+	"9itchi-notification-api/models/mapping"
 	"9itchi-notification-api/repositories"
+	"9itchi-notification-api/utils"
+
+	"go.uber.org/zap"
 )
+
+const (
+	defaultPageSize = 20
+	maxPageSize     = 100
+)
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// allowedTypes is the allow-list of notification types (mirrors the CHECK constraint).
+var allowedTypes = map[string]bool{
+	"email_opened":         true,
+	"scheduled_email_sent": true,
+	"email_failed":         true,
+	"new_matching_jobs":    true,
+	"admin_message":        true,
+	"system":               true,
+}
 
 // NotificationService holds all business logic for notification. Handlers stay thin.
 type NotificationService interface {
-	// GET /notifications: own notifications
-	ListNotifications(ctx context.Context, userID string) (any, *models.ApiError)
-	// PUT /notifications/:id/read: mark one as read
-	MarkRead(ctx context.Context, userID string, id string) (any, *models.ApiError)
+	// GET /notifications: own notifications, newest first, with unread_count
+	ListNotifications(ctx context.Context, userID string, q api.ListNotificationsQuery) (*api.NotificationListResponse, *models.ApiError)
+	// PUT /notifications/:id/read: mark one as read (404 if not the caller's)
+	MarkRead(ctx context.Context, userID string, id string) (*api.NotificationResponse, *models.ApiError)
 	// PUT /notifications/read-all: mark all as read
-	MarkAllRead(ctx context.Context, userID string) (any, *models.ApiError)
+	MarkAllRead(ctx context.Context, userID string) (*api.MarkAllReadResponse, *models.ApiError)
 	// GET /notifications/ably-token: scoped Ably token request for user:{id} channels
-	AblyToken(ctx context.Context, userID string) (any, *models.ApiError)
-	// POST /internal/notifications: create + push a notification
-	SendNotification(ctx context.Context, req api.SendNotificationRequest) (any, *models.ApiError)
+	AblyToken(ctx context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError)
+	// POST /internal/notifications: store, deliver through channels, publish realtime
+	SendNotification(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError)
+	// HandleEvent turns a domain event (core.Event*) into a notification. Unknown events are ignored.
+	HandleEvent(ctx context.Context, event string, payload map[string]any)
 }
 
 type notificationService struct {
-	repo repositories.NotificationRepository
+	repo     repositories.NotificationRepository
+	channels core.ChannelFactory
+	realtime core.Realtime
+	events   map[string]func(ctx context.Context, payload map[string]any)
 }
 
-func NewNotificationService(repo repositories.NotificationRepository) NotificationService {
-	return &notificationService{repo: repo}
+func NewNotificationService(repo repositories.NotificationRepository, channels core.ChannelFactory, realtime core.Realtime) NotificationService {
+	s := &notificationService{repo: repo, channels: channels, realtime: realtime}
+	s.events = map[string]func(ctx context.Context, payload map[string]any){
+		core.EventEmailOpened: s.fromEvent("email_opened", "Your email was opened"),
+		core.EventEmailSent:   s.fromEvent("scheduled_email_sent", "Your scheduled email was sent"),
+		core.EventEmailFailed: s.fromEvent("email_failed", "Your email could not be sent"),
+		core.EventJobsMatched: s.fromEvent("new_matching_jobs", "New jobs match your profile"),
+	}
+	return s
 }
 
-func (s *notificationService) ListNotifications(_ context.Context, _ string) (any, *models.ApiError) {
+// fromEvent builds an event handler: payload.user_id is the recipient, the rest of the payload is stored as data.
+func (s *notificationService) fromEvent(notifType, title string) func(ctx context.Context, payload map[string]any) {
+	return func(ctx context.Context, payload map[string]any) {
+		userID, _ := payload["user_id"].(string)
+		data := make(map[string]any, len(payload))
+		for k, v := range payload {
+			if k != "user_id" {
+				data[k] = v
+			}
+		}
+		req := api.SendNotificationRequest{UserID: userID, Type: notifType, Title: title, Data: data}
+		if _, apiErr := s.SendNotification(ctx, req); apiErr != nil {
+			utils.Logger.Warn("event notification failed", zap.String("type", notifType), zap.Int("status", apiErr.Code))
+		}
+	}
+}
+
+func (s *notificationService) HandleEvent(ctx context.Context, event string, payload map[string]any) {
+	if handle, ok := s.events[event]; ok {
+		handle(ctx, payload)
+	}
+}
+
+func (s *notificationService) ListNotifications(ctx context.Context, userID string, q api.ListNotificationsQuery) (*api.NotificationListResponse, *models.ApiError) {
+	page, size := q.Page, q.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = defaultPageSize
+	}
+	if size > maxPageSize {
+		size = maxPageSize
+	}
+	rows, err := s.repo.List(ctx, userID, q.Unread, size, (page-1)*size)
+	if err != nil {
+		return nil, internalError("list notifications", err)
+	}
+	total, err := s.repo.Count(ctx, userID, q.Unread)
+	if err != nil {
+		return nil, internalError("count notifications", err)
+	}
+	unread := total
+	if !q.Unread {
+		if unread, err = s.repo.Count(ctx, userID, true); err != nil {
+			return nil, internalError("count unread notifications", err)
+		}
+	}
+	items := make([]api.NotificationResponse, 0, len(rows))
+	for i := range rows {
+		items = append(items, mapping.NotificationToResponse(&rows[i]))
+	}
+	return &api.NotificationListResponse{Items: items, Total: total, Page: page, PageSize: size, UnreadCount: unread}, nil
+}
+
+func (s *notificationService) MarkRead(ctx context.Context, userID string, id string) (*api.NotificationResponse, *models.ApiError) {
+	if !uuidRe.MatchString(id) {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid notification id")}
+	}
+	n, err := s.repo.MarkRead(ctx, userID, id)
+	if errors.Is(err, repositories.ErrNotFound) {
+		return nil, &models.ApiError{Code: http.StatusNotFound, Error: errors.New("notification not found")}
+	}
+	if err != nil {
+		return nil, internalError("mark notification read", err)
+	}
+	res := mapping.NotificationToResponse(n)
+	return &res, nil
+}
+
+func (s *notificationService) MarkAllRead(ctx context.Context, userID string) (*api.MarkAllReadResponse, *models.ApiError) {
+	updated, err := s.repo.MarkAllRead(ctx, userID)
+	if err != nil {
+		return nil, internalError("mark all notifications read", err)
+	}
+	return &api.MarkAllReadResponse{Updated: updated}, nil
+}
+
+func (s *notificationService) AblyToken(_ context.Context, _ string) (*api.AblyTokenResponse, *models.ApiError) {
 	return nil, models.NotImplemented()
 }
 
-func (s *notificationService) MarkRead(_ context.Context, _ string, _ string) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
+func (s *notificationService) SendNotification(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError) {
+	if !uuidRe.MatchString(req.UserID) {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user_id")}
+	}
+	if !allowedTypes[req.Type] {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid notification type")}
+	}
+	if req.Title == "" || len(req.Title) > 200 {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid title")}
+	}
+	n, err := s.repo.Create(ctx, &db.Notification{UserID: req.UserID, Type: req.Type, Title: req.Title, Data: req.Data})
+	if err != nil {
+		return nil, internalError("create notification", err)
+	}
+	res := mapping.NotificationToResponse(n)
+	for name, newChannel := range s.channels {
+		if err := newChannel().Send(ctx, n.UserID, n.Title, res.Data); err != nil {
+			utils.Logger.Warn("channel delivery failed", zap.String("channel", name))
+		}
+	}
+	if s.realtime != nil {
+		if err := s.realtime.Publish(ctx, n.UserID, res); err != nil {
+			utils.Logger.Warn("realtime publish failed")
+		}
+	}
+	return &res, nil
 }
 
-func (s *notificationService) MarkAllRead(_ context.Context, _ string) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
-}
-
-func (s *notificationService) AblyToken(_ context.Context, _ string) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
-}
-
-func (s *notificationService) SendNotification(_ context.Context, _ api.SendNotificationRequest) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
+// internalError logs the cause and returns a generic 500.
+func internalError(op string, err error) *models.ApiError {
+	utils.Logger.Error(op+" failed", zap.Error(err))
+	return &models.ApiError{Code: http.StatusInternalServerError, Error: errors.New("internal server error")}
 }

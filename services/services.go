@@ -1,6 +1,7 @@
 package services
 
 import (
+	"9itchi-notification-api/core"
 	"9itchi-notification-api/pkg/account"
 	"9itchi-notification-api/repositories"
 	"9itchi-notification-api/utils"
@@ -19,7 +20,7 @@ type Clients struct {
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
 	return &Services{
-		Notification: NewNotificationService(repos.Notification),
+		Notification: NewNotificationService(repos.Notification, core.NewChannelFactory(), core.NoopRealtime{}),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
 		},

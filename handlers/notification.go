@@ -13,7 +13,12 @@ import (
 // ListNotifications: GET /notifications (user) own notifications.
 func ListNotifications(svc services.NotificationService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		result, apiErr := svc.ListNotifications(c.Request.Context(), c.GetString("user_id"))
+		var q api.ListNotificationsQuery
+		if err := c.ShouldBindQuery(&q); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.ListNotifications(c.Request.Context(), c.GetString("user_id"), q)
 		if apiErr != nil {
 			models.FormatError(c, apiErr)
 			return
