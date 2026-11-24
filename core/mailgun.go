@@ -40,7 +40,7 @@ type mailgunSender struct {
 
 func (s mailgunSender) send(ctx context.Context, from, to, subject, text, htmlBody string) error {
 	msg := mailgun.NewMessage(from, subject, text, to)
-	msg.SetHtml(htmlBody)
+	msg.SetHTML(htmlBody)
 	_, _, err := s.mg.Send(ctx, msg)
 	return err
 }
