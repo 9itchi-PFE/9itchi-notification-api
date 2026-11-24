@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"9itchi-notification-api/core"
 	"9itchi-notification-api/models/api"
@@ -294,9 +295,10 @@ func TestWithoutMailgunNoEmailLeavesAndNothingBreaks(t *testing.T) {
 // Every email exists in the three languages, with nothing left to fill in.
 func TestEmailCatalogIsComplete(t *testing.T) {
 	d := emailDetails{Name: "Ines", Company: "Acme", JobTitle: "Portail RH", Millimes: 30000, ReceiptNo: "2026-000123", PaymentID: "pay-1"}
-	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailReceipt, emailWelcome} {
+	d.Day = time.Date(2026, 12, 24, 9, 0, 0, 0, time.UTC)
+	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailReceipt, emailWelcome, emailRenewalDue, emailRenewalLapsed} {
 		for _, lang := range []string{"fr", "en", "ar"} {
-			for _, details := range []emailDetails{d, {Millimes: 30000}} {
+			for _, details := range []emailDetails{d, {Millimes: 30000, Day: d.Day}} {
 				c, ok := writeEmail(kind, lang, "https://app.example", details)
 				require.True(t, ok, kind+" "+lang)
 				for _, v := range []string{c.Subject, c.Category, c.Text, c.Button, c.Footer, c.FooterLink} {
@@ -358,4 +360,57 @@ func TestAlertPreferences(t *testing.T) {
 	_, apiErr = e.svc.UpdateAlertPreferences(context.Background(), uid, api.UpdateAlertPreferencesRequest{Items: []api.AlertPreference{{Kind: "tips", Email: &yes, InApp: &yes}}})
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
+}
+
+func TestRenewalReminderEmail(t *testing.T) {
+	payload := func(stage string) map[string]any {
+		return map[string]any{"user_id": uid, "subscription_id": "s1", "plan_name": "Abonnement étudiant", "price_millimes": float64(35000), "ends_at": "2026-12-24T09:00:00Z", "stage": stage}
+	}
+
+	e := newAlertEnv()
+	// The reminder is what keeps a subscription going: no alert setting switches it off.
+	e.prefs.Rows = map[string]db.AlertPreference{core.AlertApplications: {Kind: core.AlertApplications}}
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionRenewalDue, payload("due")))
+	assert.Empty(t, e.stored, "an email, not a notification: the app has its own banner")
+	require.Len(t, e.mail.sent, 1)
+	m := e.mail.sent[0]
+	assert.Equal(t, "Ton abonnement est à renouveler le 24 décembre 2026", m.subject)
+	assert.Contains(t, m.text, "paie 35,000 TND sur Flouci")
+	assert.Contains(t, m.text, "Rien n’est prélevé automatiquement")
+	assert.Contains(t, m.html, `href="https://app.example/settings/billing"`)
+
+	e = newAlertEnv()
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionRenewalDue, payload("lapsed")))
+	require.Len(t, e.mail.sent, 1)
+	assert.Equal(t, "Ton abonnement s’est terminé le 24 décembre 2026", e.mail.sent[0].subject)
+	assert.Contains(t, e.mail.sent[0].text, "Il n’a pas été renouvelé")
+
+	for lang, want := range map[string]string{"en": "Your subscription is due for renewal on 24 December 2026", "ar": "يجب تجديد اشتراكك قبل 24 ديسمبر 2026"} {
+		e = newAlertEnv()
+		e.user.Language = lang
+		require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionRenewalDue, payload("due")))
+		assert.Equal(t, want, e.mail.sent[0].subject)
+	}
+
+	t.Run("the day is the one in Tunis", func(t *testing.T) {
+		e := newAlertEnv()
+		p := payload("due")
+		p["ends_at"] = "2026-12-23T23:30:00Z" // 00:30 on the 24th in Tunis
+		require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionRenewalDue, p))
+		assert.Contains(t, e.mail.sent[0].subject, "24 décembre 2026")
+	})
+	t.Run("a payload that cannot be told is ignored, never delivered again", func(t *testing.T) {
+		for name, change := range map[string]func(p map[string]any){
+			"no user":       func(p map[string]any) { p["user_id"] = "nope" },
+			"unknown stage": func(p map[string]any) { p["stage"] = "soon" },
+			"no day":        func(p map[string]any) { p["ends_at"] = "tomorrow" },
+			"no price":      func(p map[string]any) { p["price_millimes"] = float64(0) },
+		} {
+			e := newAlertEnv()
+			p := payload("due")
+			change(p)
+			assert.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionRenewalDue, p), name)
+			assert.Empty(t, e.mail.sent, name)
+		}
+	})
 }

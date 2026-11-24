@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"9itchi-notification-api/core"
 )
@@ -15,6 +16,8 @@ const (
 	emailFailed        = "email_failed"
 	emailReceipt       = "receipt"
 	emailWelcome       = "welcome"
+	emailRenewalDue    = "renewal_due"
+	emailRenewalLapsed = "renewal_lapsed"
 )
 
 // emailWords are the words of one kind of email in one language. The With* forms are used when the company or the
@@ -89,6 +92,28 @@ var emailCatalog = map[string]map[string]emailWords{
 			TextWith: "شكرًا! تم تأكيد دفعتك. الوصل رقم {no} موجود في حسابك وجاهز للتحميل بصيغة PDF.",
 			Button:   "عرض الوصل", path: "/settings/billing/receipts/", pathWithDetail: true},
 	},
+	emailRenewalDue: {
+		"fr": {Category: "Abonnement", Subject: "Ton abonnement est à renouveler le {date}",
+			Text:   "Ton abonnement se termine le {date}. Rien n’est prélevé automatiquement : paie {amount} TND sur Flouci pour garder la lettre, l’envoi en un clic et le suivi. Tu peux aussi l’arrêter au même endroit.",
+			Button: "Renouveler", path: "/settings/billing"},
+		"en": {Category: "Subscription", Subject: "Your subscription is due for renewal on {date}",
+			Text:   "Your subscription ends on {date}. Nothing is charged automatically: pay {amount} TND on Flouci to keep the letter, the one-click send and the follow-up. You can also stop it from the same page.",
+			Button: "Renew", path: "/settings/billing"},
+		"ar": {Category: "الاشتراك", Subject: "يجب تجديد اشتراكك قبل {date}",
+			Text:   "ينتهي اشتراكك يوم {date}. لا يُخصم أي مبلغ تلقائيًا: ادفع {amount} TND عبر Flouci للاحتفاظ بالرسالة والإرسال بنقرة واحدة والمتابعة. يمكنك أيضًا إيقافه من الصفحة نفسها.",
+			Button: "تجديد", path: "/settings/billing"},
+	},
+	emailRenewalLapsed: {
+		"fr": {Category: "Abonnement", Subject: "Ton abonnement s’est terminé le {date}",
+			Text:   "Il n’a pas été renouvelé. Paie {amount} TND sur Flouci pour retrouver la lettre, l’envoi en un clic et le suivi. Tes candidatures et ton CV sont toujours là.",
+			Button: "Renouveler", path: "/settings/billing"},
+		"en": {Category: "Subscription", Subject: "Your subscription ended on {date}",
+			Text:   "It was not renewed. Pay {amount} TND on Flouci to get back the letter, the one-click send and the follow-up. Your applications and your CV are still there.",
+			Button: "Renew", path: "/settings/billing"},
+		"ar": {Category: "الاشتراك", Subject: "انتهى اشتراكك يوم {date}",
+			Text:   "لم يُجدَّد. ادفع {amount} TND عبر Flouci لاستعادة الرسالة والإرسال بنقرة واحدة والمتابعة. ترشّحاتك وسيرتك الذاتية ما زالت محفوظة.",
+			Button: "تجديد", path: "/settings/billing"},
+	},
 	emailWelcome: {
 		"fr": {Category: "Inscription", Subject: "Bienvenue sur 9itchi !", SubjectWith: "Bienvenue sur 9itchi, {name} !",
 			Text:   "Ton compte est créé. Importe ton CV, corrige-le, puis postule aux offres faites pour toi.",
@@ -118,6 +143,8 @@ type emailDetails struct {
 	Millimes  int64 // amount paid, in millimes (receipt); written for the language of the email
 	ReceiptNo string
 	PaymentID string
+	// Day is the day a subscription ends or ended (renewal reminders); written for the language of the email.
+	Day time.Time
 }
 
 // writeEmail builds the email of a kind in a language. ok is false for a kind the catalog does not have.
@@ -150,7 +177,7 @@ func writeEmail(kind, lang, frontendURL string, d emailDetails) (c core.EmailCon
 		// A receipt number reads left to right; alone in Arabic text its two halves would swap around the hyphen.
 		no = "\u2066" + no + "\u2069"
 	}
-	fill := strings.NewReplacer("{company}", d.Company, "{title}", d.JobTitle, "{name}", d.Name, "{amount}", tnd(d.Millimes, lang), "{no}", no)
+	fill := strings.NewReplacer("{company}", d.Company, "{title}", d.JobTitle, "{name}", d.Name, "{amount}", tnd(d.Millimes, lang), "{no}", no, "{date}", longDate(d.Day, lang))
 	base := strings.TrimRight(frontendURL, "/")
 	url := base + w.path
 	if w.pathWithDetail {
@@ -180,4 +207,23 @@ func firstName(name string) string {
 		return fields[0]
 	}
 	return ""
+}
+
+// tunis is the time of the students: UTC+1 all year. A subscription that ends at 00:30 in Tunis ends that day, not
+// the day before.
+var tunis = time.FixedZone("Africa/Tunis", 3600)
+
+var monthNames = map[string][12]string{
+	"fr": {"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"},
+	"en": {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
+	"ar": {"يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"},
+}
+
+// longDate writes a day in full for a language: 24 décembre 2026, 24 December 2026.
+func longDate(t time.Time, lang string) string {
+	if t.IsZero() {
+		return ""
+	}
+	t = t.In(tunis)
+	return fmt.Sprintf("%d %s %d", t.Day(), monthNames[emailLanguage(lang)][t.Month()-1], t.Year())
 }

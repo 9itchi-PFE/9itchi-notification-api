@@ -30,6 +30,7 @@ Optional. With `RABBITMQ_URL` set, the service reads the durable queue `notifica
 | `jobs.matched` | notification `new_matching_jobs`, by the user's choice for `matches` |
 | `payment.completed` | the receipt by email, always (nothing for a payment of 0) |
 | `user.registered` | the welcome email, always |
+| `subscription.renewal_due` | the renewal reminder by email, always: `stage` `due` (the period ends soon) or `lapsed` (it ended without a renewal) |
 
 - `email.sent` and `email.failed` say nothing when the student clicked the send: its result is on the screen.
 - For the three application events the offer is read from email-api (`GET /internal/emails/:id/context`), so the notification data carries `company`, `job_title`, `application_id` and `job_id`, and the email says « Acme a ouvert ta candidature ». Without it (email-api down, or an email sent for no application) both are told without the name.
