@@ -16,7 +16,7 @@ Port `8087`, health `/health`. Notifications are stored in PostgreSQL. Live push
 | PUT | `/notifications/preferences` | user | UpdateAlertPreferences (`items`: the kinds to change; the others keep their choice) |
 | POST | `/internal/notifications` | internal | SendNotification (`user_id`, `type`, `title`, `data`, optional `channels`) |
 
-Types: `email_opened`, `scheduled_email_sent`, `email_failed`, `new_matching_jobs`, `admin_message`, `system`.
+Types: `email_opened`, `scheduled_email_sent`, `email_failed`, `new_matching_jobs`, `saved_job_closing`, `cv_tip`, `admin_message`, `system`.
 
 ## Events (RabbitMQ)
 
@@ -27,7 +27,9 @@ Optional. With `RABBITMQ_URL` set, the service reads the durable queue `notifica
 | `email.opened` | notification `email_opened` + email, by the user's choice for `applications` |
 | `email.sent` with `scheduled: true` | notification `scheduled_email_sent` + email, by the user's choice for `applications` |
 | `email.failed` with `scheduled: true` | notification `email_failed` + email, always (an application that could not leave is not something to switch off) |
-| `jobs.matched` | notification `new_matching_jobs`, by the user's choice for `matches` |
+| `jobs.matched` with `count` above 0 | notification `new_matching_jobs` + email « 4 nouvelles offres pour toi », by the user's choice for `matches` (job-api, one a day at most) |
+| `job.closing_soon` with `job_id` and `closes_on` | notification `saved_job_closing` + email « Acme : l’offre ferme le 3 décembre 2026 », by the user's choice for `closing` (job-api, once per saved offer) |
+| `cv.tips` with `resume_id` and `count` above 0 | notification `cv_tip` + email « 3 points à corriger sur ton CV », by the user's choice for `tips` (resume-api, once a week at most) |
 | `payment.completed` | the receipt by email, always (nothing for a payment of 0) |
 | `user.registered` | the welcome email, always |
 | `subscription.renewal_due` | the renewal reminder by email, always: `stage` `due` (the period ends soon) or `lapsed` (it ended without a renewal) |
@@ -41,7 +43,7 @@ Optional. With `RABBITMQ_URL` set, the service reads the durable queue `notifica
 
 ## Alerts and emails
 
-`alert_preferences` keeps, per user and kind (`applications`, `matches`, `closing`, `tips`), whether the alert goes by `email` and `in_app`. A kind the user never chose for keeps its default: both, except `tips` (in 9itchi only). `closing` and `tips` have no sender yet.
+`alert_preferences` keeps, per user and kind (`applications`, `matches`, `closing`, `tips`), whether the alert goes by `email` and `in_app`. A kind the user never chose for keeps its default: both, except `tips` (in 9itchi only).
 
 Emails are written in the user's language (`language` from account-api: `fr`, `en` or `ar`, French when unknown), all with the same layout: logo, category, heading, a short text, one button to `FRONTEND_URL`, and a footer leading to `/settings/alerts`. Arabic reads right to left. Every value is HTML-escaped. The address is fetched from account-api for each send and never stored or logged. Without Mailgun no email leaves and nothing else changes.
 

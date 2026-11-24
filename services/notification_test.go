@@ -282,6 +282,16 @@ func TestHandleEvent(t *testing.T) {
 		{core.EventEmailSent, map[string]any{"count": 3, "scheduled": true}, "scheduled_email_sent"},
 		{core.EventEmailFailed, map[string]any{"count": 3, "scheduled": true}, "email_failed"},
 		{core.EventJobsMatched, map[string]any{"count": 3}, "new_matching_jobs"},
+		{core.EventJobsMatched, map[string]any{"count": float64(2)}, "new_matching_jobs"},
+		{core.EventJobClosingSoon, map[string]any{"job_id": nid, "job_title": "Portail RH", "company": "Acme", "closes_on": "2026-12-03", "days_left": float64(2)}, "saved_job_closing"},
+		{core.EventCVTips, map[string]any{"resume_id": nid, "count": float64(4), "rule": "summary"}, "cv_tip"},
+		// Nothing to count, no offer or no day, no CV: not news.
+		{core.EventJobsMatched, map[string]any{"count": float64(0)}, ""},
+		{core.EventJobsMatched, map[string]any{}, ""},
+		{core.EventJobClosingSoon, map[string]any{"job_id": nid, "closes_on": "soon"}, ""},
+		{core.EventJobClosingSoon, map[string]any{"closes_on": "2026-12-03"}, ""},
+		{core.EventCVTips, map[string]any{"resume_id": nid, "count": float64(0)}, ""},
+		{core.EventCVTips, map[string]any{"count": float64(4)}, ""},
 		// A send the student clicked shows its result on the screen: no notification.
 		{core.EventEmailSent, map[string]any{"scheduled": false}, ""},
 		{core.EventEmailSent, map[string]any{}, ""},

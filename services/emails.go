@@ -2,18 +2,22 @@ package services
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"9itchi-notification-api/core"
 )
 
-// The emails 9itchi sends, by kind. The first three follow a notification type; the last two are sent whatever the
-// alert settings say (a receipt, a welcome).
+// The emails 9itchi sends, by kind. The first six follow a notification type, so the alert settings decide whether
+// they leave; the others are sent whatever the settings say (a receipt, a welcome, a renewal reminder).
 const (
 	emailOpened        = "email_opened"
 	emailScheduledSent = "scheduled_email_sent"
 	emailFailed        = "email_failed"
+	emailMatches       = "new_matching_jobs"
+	emailClosing       = "saved_job_closing"
+	emailTips          = "cv_tip"
 	emailReceipt       = "receipt"
 	emailWelcome       = "welcome"
 	emailRenewalDue    = "renewal_due"
@@ -21,16 +25,20 @@ const (
 )
 
 // emailWords are the words of one kind of email in one language. The With* forms are used when the company or the
-// offer is known; {company}, {title}, {name}, {amount} and {no} are replaced.
+// offer is known, the One forms when the email counts exactly one thing; {company}, {title}, {name}, {amount}, {no},
+// {date} and {count} are replaced.
 type emailWords struct {
-	Category       string
-	Subject        string
-	SubjectWith    string // with {company}
-	Text           string
-	TextWith       string // with {title}
-	Button         string
-	path           string // page of the app the button opens
-	pathWithDetail bool   // the path ends with the payment id (receipt)
+	Category    string
+	Subject     string
+	SubjectWith string // with {company}
+	SubjectOne  string
+	Text        string
+	TextWith    string // with {title}
+	TextOne     string
+	Button      string
+	// path is the page of the app the button opens; {id} is replaced by what the email is about (a payment, an
+	// offer, a CV).
+	path string
 }
 
 type footerWords struct{ Text, Link string }
@@ -78,19 +86,61 @@ var emailCatalog = map[string]map[string]emailWords{
 			Text:   "تعذّر الإرسال المبرمج. افتح ترشّحاتك لمعرفة ما حدث وإعادة الإرسال.",
 			Button: "عرض ترشّحاتي", path: "/applications"},
 	},
+	emailMatches: {
+		"fr": {Category: "Nouvelles offres", Subject: "{count} nouvelles offres pour toi", SubjectOne: "1 nouvelle offre pour toi",
+			Text:    "{count} offres qui correspondent à ce que tu cherches viennent d’être publiées.",
+			TextOne: "Une offre qui correspond à ce que tu cherches vient d’être publiée.",
+			Button:  "Voir mes offres", path: "/jobs"},
+		"en": {Category: "New offers", Subject: "{count} new offers for you", SubjectOne: "1 new offer for you",
+			Text:    "{count} offers that fit what you are looking for were just published.",
+			TextOne: "An offer that fits what you are looking for was just published.",
+			Button:  "See my offers", path: "/jobs"},
+		"ar": {Category: "عروض جديدة", Subject: "عروض جديدة تناسبك: {count}", SubjectOne: "عرض جديد يناسبك",
+			Text:    "نُشرت عروض جديدة تناسب ما تبحث عنه (العدد: {count}).",
+			TextOne: "نُشر عرض جديد يناسب ما تبحث عنه.",
+			Button:  "عرض عروضي", path: "/jobs"},
+	},
+	emailClosing: {
+		"fr": {Category: "Offre enregistrée", Subject: "Une offre enregistrée ferme le {date}", SubjectWith: "{company} : l’offre ferme le {date}",
+			Text:     "Une offre que tu as enregistrée ferme le {date}. Si elle t’intéresse toujours, c’est le moment de postuler.",
+			TextWith: "L’offre « {title} » que tu as enregistrée ferme le {date}. Si elle t’intéresse toujours, c’est le moment de postuler.",
+			Button:   "Voir l’offre", path: "/jobs/{id}"},
+		"en": {Category: "Saved offer", Subject: "A saved offer closes on {date}", SubjectWith: "{company}: the offer closes on {date}",
+			Text:     "An offer you saved closes on {date}. If you are still interested, now is the time to apply.",
+			TextWith: "The offer “{title}” you saved closes on {date}. If you are still interested, now is the time to apply.",
+			Button:   "See the offer", path: "/jobs/{id}"},
+		"ar": {Category: "عرض محفوظ", Subject: "عرض محفوظ يُغلق يوم {date}", SubjectWith: "{company}: يُغلق العرض يوم {date}",
+			Text:     "عرض حفظتَه يُغلق يوم {date}. إن كان ما زال يهمّك، فهذا وقت الترشّح.",
+			TextWith: "العرض «{title}» الذي حفظتَه يُغلق يوم {date}. إن كان ما زال يهمّك، فهذا وقت الترشّح.",
+			Button:   "عرض العرض", path: "/jobs/{id}"},
+	},
+	emailTips: {
+		"fr": {Category: "Conseils CV", Subject: "{count} points à corriger sur ton CV", SubjectOne: "1 point à corriger sur ton CV",
+			Text:    "La vérification de ton CV trouve encore {count} points à corriger. Ouvre-la pour les voir et les régler un par un.",
+			TextOne: "La vérification de ton CV trouve encore un point à corriger. Ouvre-la pour le voir et le régler.",
+			Button:  "Vérifier mon CV", path: "/resumes/{id}/check"},
+		"en": {Category: "CV advice", Subject: "{count} points to correct on your CV", SubjectOne: "1 point to correct on your CV",
+			Text:    "The check of your CV still finds {count} points to correct. Open it to see them and fix them one by one.",
+			TextOne: "The check of your CV still finds one point to correct. Open it to see it and fix it.",
+			Button:  "Check my CV", path: "/resumes/{id}/check"},
+		"ar": {Category: "نصائح السيرة الذاتية", Subject: "نقاط للتصحيح في سيرتك الذاتية: {count}", SubjectOne: "نقطة واحدة للتصحيح في سيرتك الذاتية",
+			Text:    "ما زال فحص سيرتك الذاتية يجد نقاطًا للتصحيح (العدد: {count}). افتحه لرؤيتها وتصحيحها واحدة تلو الأخرى.",
+			TextOne: "ما زال فحص سيرتك الذاتية يجد نقطة واحدة للتصحيح. افتحه لرؤيتها وتصحيحها.",
+			Button:  "فحص سيرتي الذاتية", path: "/resumes/{id}/check"},
+	},
 	emailReceipt: {
 		"fr": {Category: "Paiement", Subject: "Ton reçu 9itchi · {amount} TND",
 			Text:     "Merci ! Ton paiement est confirmé. Ton reçu est dans ton compte, à télécharger en PDF.",
 			TextWith: "Merci ! Ton paiement est confirmé. Ton reçu n° {no} est dans ton compte, à télécharger en PDF.",
-			Button:   "Voir le reçu", path: "/settings/billing/receipts/", pathWithDetail: true},
+			Button:   "Voir le reçu", path: "/settings/billing/receipts/{id}"},
 		"en": {Category: "Payment", Subject: "Your 9itchi receipt · {amount} TND",
 			Text:     "Thank you! Your payment is confirmed. Your receipt is in your account, ready to download as a PDF.",
 			TextWith: "Thank you! Your payment is confirmed. Receipt no. {no} is in your account, ready to download as a PDF.",
-			Button:   "See the receipt", path: "/settings/billing/receipts/", pathWithDetail: true},
+			Button:   "See the receipt", path: "/settings/billing/receipts/{id}"},
 		"ar": {Category: "الدفع", Subject: "وصلك من 9itchi · {amount} TND",
 			Text:     "شكرًا! تم تأكيد دفعتك. وصلك موجود في حسابك وجاهز للتحميل بصيغة PDF.",
 			TextWith: "شكرًا! تم تأكيد دفعتك. الوصل رقم {no} موجود في حسابك وجاهز للتحميل بصيغة PDF.",
-			Button:   "عرض الوصل", path: "/settings/billing/receipts/", pathWithDetail: true},
+			Button:   "عرض الوصل", path: "/settings/billing/receipts/{id}"},
 	},
 	emailRenewalDue: {
 		"fr": {Category: "Abonnement", Subject: "Ton abonnement est à renouveler le {date}",
@@ -142,9 +192,13 @@ type emailDetails struct {
 	JobTitle  string
 	Millimes  int64 // amount paid, in millimes (receipt); written for the language of the email
 	ReceiptNo string
-	PaymentID string
-	// Day is the day a subscription ends or ended (renewal reminders); written for the language of the email.
+	// LinkID is what the button opens: the payment of a receipt, the offer that closes, the CV to check.
+	LinkID string
+	// Day is the day a subscription ends or ended (renewal reminders) or an offer closes; written for the language
+	// of the email.
 	Day time.Time
+	// Count is how many offers are new, or how many points of a CV are left to correct.
+	Count int
 }
 
 // writeEmail builds the email of a kind in a language. ok is false for a kind the catalog does not have.
@@ -171,18 +225,18 @@ func writeEmail(kind, lang, frontendURL string, d emailDetails) (c core.EmailCon
 		if d.JobTitle != "" && w.TextWith != "" {
 			text = w.TextWith
 		}
+		if d.Count == 1 && w.SubjectOne != "" {
+			subject, text = w.SubjectOne, w.TextOne
+		}
 	}
 	no := d.ReceiptNo
 	if lang == "ar" && no != "" {
 		// A receipt number reads left to right; alone in Arabic text its two halves would swap around the hyphen.
 		no = "\u2066" + no + "\u2069"
 	}
-	fill := strings.NewReplacer("{company}", d.Company, "{title}", d.JobTitle, "{name}", d.Name, "{amount}", tnd(d.Millimes, lang), "{no}", no, "{date}", longDate(d.Day, lang))
+	fill := strings.NewReplacer("{company}", d.Company, "{title}", d.JobTitle, "{name}", d.Name, "{amount}", tnd(d.Millimes, lang), "{no}", no, "{date}", longDate(d.Day, lang), "{count}", strconv.Itoa(d.Count))
 	base := strings.TrimRight(frontendURL, "/")
-	url := base + w.path
-	if w.pathWithDetail {
-		url += d.PaymentID
-	}
+	url := base + strings.ReplaceAll(w.path, "{id}", d.LinkID)
 	footer := emailFooters[lang]
 	return core.EmailContent{
 		Lang: lang, Subject: fill.Replace(subject), Category: w.Category, Text: fill.Replace(text),

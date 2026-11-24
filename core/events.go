@@ -19,6 +19,10 @@ const (
 	EventPaymentCompleted    = "payment.completed"
 	// EventSubscriptionRenewalDue: a renewing subscription ends soon (stage "due") or ended without a renewal ("lapsed").
 	EventSubscriptionRenewalDue = "subscription.renewal_due"
+	// EventJobClosingSoon: an offer a student saved closes within a few days (job-api, once per saved offer).
+	EventJobClosingSoon = "job.closing_soon"
+	// EventCVTips: the check of a student's CV still finds points to correct (resume-api, once a week at most).
+	EventCVTips = "cv.tips"
 )
 
 // Publisher sends domain events. Swap LogPublisher for a RabbitMQ implementation without touching services.

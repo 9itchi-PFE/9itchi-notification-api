@@ -35,6 +35,8 @@ var allowedTypes = map[string]bool{
 	"scheduled_email_sent": true,
 	"email_failed":         true,
 	"new_matching_jobs":    true,
+	"saved_job_closing":    true,
+	"cv_tip":               true,
 	"admin_message":        true,
 	"system":               true,
 }
@@ -67,6 +69,7 @@ const EventsQueue = "notification-api.events"
 var HandledEvents = []string{
 	core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched,
 	core.EventPaymentCompleted, core.EventUserRegistered, core.EventSubscriptionRenewalDue,
+	core.EventJobClosingSoon, core.EventCVTips,
 }
 
 type notificationService struct {
@@ -88,7 +91,9 @@ func NewNotificationService(repo repositories.NotificationRepository, channels c
 		// A send the student clicked shows its result on the screen: only what the scheduler did is news.
 		core.EventEmailSent:              s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
 		core.EventEmailFailed:            s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
-		core.EventJobsMatched:            s.fromEvent("new_matching_jobs", "New jobs match your profile", nil),
+		core.EventJobsMatched:            s.fromEvent("new_matching_jobs", "New jobs match your profile", hasCount),
+		core.EventJobClosingSoon:         s.fromEvent("saved_job_closing", "A saved offer closes soon", closesOnADay),
+		core.EventCVTips:                 s.fromEvent("cv_tip", "Your CV has points to correct", tipsACV),
 		core.EventPaymentCompleted:       s.receiptEmail,
 		core.EventUserRegistered:         s.welcomeEmail,
 		core.EventSubscriptionRenewalDue: s.renewalEmail,

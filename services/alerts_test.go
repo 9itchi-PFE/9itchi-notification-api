@@ -294,11 +294,11 @@ func TestWithoutMailgunNoEmailLeavesAndNothingBreaks(t *testing.T) {
 
 // Every email exists in the three languages, with nothing left to fill in.
 func TestEmailCatalogIsComplete(t *testing.T) {
-	d := emailDetails{Name: "Ines", Company: "Acme", JobTitle: "Portail RH", Millimes: 30000, ReceiptNo: "2026-000123", PaymentID: "pay-1"}
+	d := emailDetails{Name: "Ines", Company: "Acme", JobTitle: "Portail RH", Millimes: 30000, ReceiptNo: "2026-000123", LinkID: "pay-1", Count: 3}
 	d.Day = time.Date(2026, 12, 24, 9, 0, 0, 0, time.UTC)
-	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailReceipt, emailWelcome, emailRenewalDue, emailRenewalLapsed} {
+	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailMatches, emailClosing, emailTips, emailReceipt, emailWelcome, emailRenewalDue, emailRenewalLapsed} {
 		for _, lang := range []string{"fr", "en", "ar"} {
-			for _, details := range []emailDetails{d, {Millimes: 30000, Day: d.Day}} {
+			for _, details := range []emailDetails{d, {Millimes: 30000, Day: d.Day, Count: 1, LinkID: "id-1"}} {
 				c, ok := writeEmail(kind, lang, "https://app.example", details)
 				require.True(t, ok, kind+" "+lang)
 				for _, v := range []string{c.Subject, c.Category, c.Text, c.Button, c.Footer, c.FooterLink} {
@@ -413,4 +413,61 @@ func TestRenewalReminderEmail(t *testing.T) {
 			assert.Empty(t, e.mail.sent, name)
 		}
 	})
+}
+
+// The three alerts that are not about an application: each has its own setting, its own words and its own page.
+func TestMatchesClosingAndTipsAlerts(t *testing.T) {
+	tests := []struct {
+		name, event, kind string
+		payload           map[string]any
+		subject, url      string
+		inText            []string
+	}{
+		{"new offers", core.EventJobsMatched, core.AlertMatches, map[string]any{"count": float64(4)},
+			"4 nouvelles offres pour toi", "https://app.example/jobs", []string{"4 offres"}},
+		{"one new offer", core.EventJobsMatched, core.AlertMatches, map[string]any{"count": float64(1)},
+			"1 nouvelle offre pour toi", "https://app.example/jobs", []string{"Une offre"}},
+		{"a saved offer closes", core.EventJobClosingSoon, core.AlertClosing,
+			map[string]any{"job_id": nid, "job_title": "Portail RH", "company": "Acme", "closes_on": "2026-12-03", "days_left": float64(2)},
+			"Acme : l’offre ferme le 3 décembre 2026", "https://app.example/jobs/" + nid, []string{"« Portail RH »", "3 décembre 2026"}},
+		{"CV tips", core.EventCVTips, core.AlertTips, map[string]any{"resume_id": nid, "count": float64(3), "rule": "summary"},
+			"3 points à corriger sur ton CV", "https://app.example/resumes/" + nid + "/check", []string{"3 points"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newAlertEnv()
+			e.prefs.Rows = map[string]db.AlertPreference{tt.kind: {Kind: tt.kind, Email: true, InApp: true}}
+			payload := map[string]any{"user_id": uid, core.EventIDKey: "evt-9"}
+			for k, v := range tt.payload {
+				payload[k] = v
+			}
+			require.NoError(t, e.svc.HandleEvent(context.Background(), tt.event, payload))
+			require.Len(t, e.stored, 1)
+			assert.Equal(t, tt.payload, e.stored[0].Data, "the client writes the line from the data")
+			require.Len(t, e.mail.sent, 1)
+			m := e.mail.sent[0]
+			assert.Equal(t, tt.subject, m.subject)
+			assert.Contains(t, m.html, `href="`+tt.url+`"`)
+			for _, want := range tt.inText {
+				assert.Contains(t, m.text, want)
+			}
+
+			// Switched off, it goes nowhere.
+			e = newAlertEnv()
+			e.prefs.Rows = map[string]db.AlertPreference{tt.kind: {Kind: tt.kind}}
+			require.NoError(t, e.svc.HandleEvent(context.Background(), tt.event, payload))
+			assert.Empty(t, e.stored)
+			assert.Empty(t, e.mail.sent)
+		})
+	}
+
+	// Never chosen: new offers and closing offers go both ways, the CV tips stay in the app.
+	for event, wantMail := range map[string]int{core.EventJobsMatched: 1, core.EventJobClosingSoon: 1, core.EventCVTips: 0} {
+		e := newAlertEnv()
+		require.NoError(t, e.svc.HandleEvent(context.Background(), event, map[string]any{
+			"user_id": uid, "count": float64(2), "job_id": nid, "closes_on": "2026-12-03", "resume_id": nid,
+		}))
+		assert.Len(t, e.stored, 1, event)
+		assert.Len(t, e.mail.sent, wantMail, event)
+	}
 }
