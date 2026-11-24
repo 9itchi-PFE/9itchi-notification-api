@@ -16,7 +16,15 @@ Port `8087`, health `/health`. Notifications are stored in PostgreSQL. Live push
 
 Types: `email_opened`, `scheduled_email_sent`, `email_failed`, `new_matching_jobs`, `admin_message`, `system`.
 
-Events: `NotificationService.HandleEvent` maps `email.opened`, `email.sent`, `email.failed`, `jobs.matched` (payload needs `user_id`) to notifications. The RabbitMQ consumer is not wired yet.
+## Events (RabbitMQ)
+
+Optional. With `RABBITMQ_URL` set, the service reads the durable queue `notification-api.events`, bound on the topic exchange `9itchi.events` to `email.opened`, `email.sent`, `email.failed` and `jobs.matched` (routing key = event name). `NotificationService.HandleEvent` turns each event into a notification for `payload.user_id`. Without the variable nothing is consumed.
+
+- `email.sent` and `email.failed` only notify when `payload.scheduled` is true: a send the student clicked shows its result on the screen.
+- An event is handled once: the message id is stored on the notification (`event_id`, unique), so a redelivery changes nothing.
+- A handler error asks the broker for one more delivery; a second failure drops the message. A message that is not a JSON object, or that names no valid user, is dropped at once.
+- The consumer reconnects on its own (1 s to 30 s between attempts) and stops with the HTTP server. Events published while the service is down wait in the queue.
+- Broker tests: `RABBITMQ_TEST_URL=amqp://guest:guest@localhost:5672/ go test -tags integration ./core/` (skipped without the variable).
 
 ## Email channel (Mailgun)
 

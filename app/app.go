@@ -20,9 +20,10 @@ import (
 )
 
 type App struct {
-	Config utils.AppConfig
-	Router *gin.Engine
-	Repos  *repositories.Repositories
+	Config   utils.AppConfig
+	Router   *gin.Engine
+	Repos    *repositories.Repositories
+	Services *services.Services
 }
 
 func New() *App {
@@ -49,6 +50,7 @@ func (app *App) setup() {
 
 	app.Config = config
 	app.Repos = repos
+	app.Services = servicesWrapper
 	app.Router = router.InitializeRouter(servicesWrapper)
 }
 
@@ -65,6 +67,14 @@ func (app *App) Run() {
 		}
 	}()
 
+	// The event consumer runs beside the HTTP server and stops with it.
+	events, stopEvents := context.WithCancel(context.Background())
+	consumed := make(chan struct{})
+	go func() {
+		defer close(consumed)
+		_ = app.Services.Consumer.Run(events, app.Services.Notification.HandleEvent)
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -72,5 +82,10 @@ func (app *App) Run() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	stopEvents()
+	select {
+	case <-consumed:
+	case <-ctx.Done():
+	}
 	app.Repos.Close()
 }

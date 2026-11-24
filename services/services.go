@@ -12,7 +12,9 @@ import (
 // Services holds service implementations and the peer clients they call.
 type Services struct {
 	Notification NotificationService
-	Clients      *Clients
+	// Consumer delivers the events of the other services to Notification.HandleEvent (no-op without RABBITMQ_URL).
+	Consumer core.EventConsumer
+	Clients  *Clients
 }
 
 // Clients holds one HTTP client per peer service (singletons, 50s timeout).
@@ -39,6 +41,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	})
 	return &Services{
 		Notification: NewNotificationService(repos.Notification, channels, realtime, tokens),
+		Consumer:     core.NewEventConsumer(config.RabbitMQURL, EventsQueue, HandledEvents),
 		Clients:      &Clients{Account: accountClient},
 	}
 }

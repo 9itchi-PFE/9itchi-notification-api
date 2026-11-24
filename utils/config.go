@@ -45,7 +45,7 @@ func LoadConfig() AppConfig {
 		EncryptionKey:          getStringWithDefault("ITCHI_ENCRYPTION_KEY", ""),
 		InternalAPIKey:         getStringWithDefault("INTERNAL_API_KEY", ""),
 		InternalAPIKeyRequired: getBoolWithDefault("INTERNAL_API_KEY_REQUIRED", true),
-		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", ""),
 		AblyAPIKey:             getStringWithDefault("ABLY_API_KEY", ""),
 		MailgunAPIKey:          getStringWithDefault("MAILGUN_API_KEY", ""),
 		MailgunDomain:          getStringWithDefault("MAILGUN_DOMAIN", ""),

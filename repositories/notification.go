@@ -8,10 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const notificationColumns = `id, user_id, type, title, data, read, created_at, updated_at`
+const notificationColumns = `id, user_id, type, title, data, read, event_id, created_at, updated_at`
 
 // NotificationRepository is the only layer that touches PostgreSQL for notification data.
 type NotificationRepository interface {
+	// Create returns ErrConflict when a notification already exists for the same event id.
 	Create(ctx context.Context, n *db.Notification) (*db.Notification, error)
 	List(ctx context.Context, userID string, unreadOnly bool, limit, offset int) ([]db.Notification, error)
 	Count(ctx context.Context, userID string, unreadOnly bool) (int, error)
@@ -36,8 +37,8 @@ func (r *notificationRepository) Create(ctx context.Context, n *db.Notification)
 		data = map[string]any{}
 	}
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`INSERT INTO notifications (user_id, type, title, data) VALUES ($1, $2, $3, $4) RETURNING `+notificationColumns,
-		n.UserID, n.Type, n.Title, data)
+		`INSERT INTO notifications (user_id, type, title, data, event_id) VALUES ($1, $2, $3, $4, $5) RETURNING `+notificationColumns,
+		n.UserID, n.Type, n.Title, data, n.EventID)
 	if err != nil {
 		return nil, MapError(err)
 	}
