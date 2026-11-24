@@ -13,7 +13,7 @@ type NotificationService struct {
 	ReadFn   func(ctx context.Context, userID, id string) (*api.NotificationResponse, *models.ApiError)
 	ReadAll  func(ctx context.Context, userID string) (*api.MarkAllReadResponse, *models.ApiError)
 	SendFn   func(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError)
-	EventFn  func(ctx context.Context, event string, payload map[string]any)
+	EventFn  func(ctx context.Context, event string, payload map[string]any) error
 	AblyFunc func(ctx context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError)
 }
 
@@ -37,6 +37,6 @@ func (m *NotificationService) SendNotification(ctx context.Context, req api.Send
 	return m.SendFn(ctx, req)
 }
 
-func (m *NotificationService) HandleEvent(ctx context.Context, event string, payload map[string]any) {
-	m.EventFn(ctx, event, payload)
+func (m *NotificationService) HandleEvent(ctx context.Context, event string, payload map[string]any) error {
+	return m.EventFn(ctx, event, payload)
 }

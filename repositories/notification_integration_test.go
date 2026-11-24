@@ -106,3 +106,23 @@ func TestNotificationMarkAllRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, bUnread)
 }
+
+func TestNotificationEventIDIsUnique(t *testing.T) {
+	repo := NewNotificationRepository(newTestStore(t))
+	ctx := context.Background()
+	id := "evt-1"
+
+	first, err := repo.Create(ctx, &db.Notification{UserID: userA, Type: "email_opened", Title: "one", EventID: &id})
+	require.NoError(t, err)
+	require.NotNil(t, first.EventID)
+	assert.Equal(t, id, *first.EventID)
+
+	_, err = repo.Create(ctx, &db.Notification{UserID: userA, Type: "email_opened", Title: "again", EventID: &id})
+	assert.ErrorIs(t, err, ErrConflict, "the same event makes one notification")
+
+	// Notifications sent through the API have no event id and are never taken for each other.
+	_, err = repo.Create(ctx, &db.Notification{UserID: userA, Type: "system", Title: "a"})
+	require.NoError(t, err)
+	_, err = repo.Create(ctx, &db.Notification{UserID: userA, Type: "system", Title: "b"})
+	require.NoError(t, err)
+}

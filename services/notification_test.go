@@ -275,13 +275,18 @@ func TestAblyToken(t *testing.T) {
 func TestHandleEvent(t *testing.T) {
 	tests := []struct {
 		event    string
+		payload  map[string]any
 		wantType string
 	}{
-		{core.EventEmailOpened, "email_opened"},
-		{core.EventEmailSent, "scheduled_email_sent"},
-		{core.EventEmailFailed, "email_failed"},
-		{core.EventJobsMatched, "new_matching_jobs"},
-		{core.EventPaymentCompleted, ""},
+		{core.EventEmailOpened, map[string]any{"count": 3}, "email_opened"},
+		{core.EventEmailSent, map[string]any{"count": 3, "scheduled": true}, "scheduled_email_sent"},
+		{core.EventEmailFailed, map[string]any{"count": 3, "scheduled": true}, "email_failed"},
+		{core.EventJobsMatched, map[string]any{"count": 3}, "new_matching_jobs"},
+		// A send the student clicked shows its result on the screen: no notification.
+		{core.EventEmailSent, map[string]any{"scheduled": false}, ""},
+		{core.EventEmailSent, map[string]any{}, ""},
+		{core.EventEmailFailed, map[string]any{"scheduled": false}, ""},
+		{core.EventPaymentCompleted, map[string]any{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.event, func(t *testing.T) {
@@ -290,7 +295,11 @@ func TestHandleEvent(t *testing.T) {
 				got = n
 				return createEcho()(ctx, n)
 			}}
-			newSvc(repo, nil).HandleEvent(context.Background(), tt.event, map[string]any{"user_id": uid, "count": 3})
+			payload := map[string]any{"user_id": uid, core.EventIDKey: "evt-1"}
+			for k, v := range tt.payload {
+				payload[k] = v
+			}
+			require.NoError(t, newSvc(repo, nil).HandleEvent(context.Background(), tt.event, payload))
 			if tt.wantType == "" {
 				assert.Nil(t, got)
 				return
@@ -298,7 +307,9 @@ func TestHandleEvent(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantType, got.Type)
 			assert.Equal(t, uid, got.UserID)
-			assert.Equal(t, map[string]any{"count": 3}, got.Data)
+			assert.Equal(t, tt.payload, got.Data, "neither the user id nor the event id is stored as data")
+			require.NotNil(t, got.EventID)
+			assert.Equal(t, "evt-1", *got.EventID)
 			assert.NotEmpty(t, got.Title)
 		})
 	}
@@ -310,6 +321,42 @@ func TestHandleEventMissingUserIsSkipped(t *testing.T) {
 		called = true
 		return createEcho()(ctx, n)
 	}}
-	newSvc(repo, nil).HandleEvent(context.Background(), core.EventEmailOpened, map[string]any{})
+	assert.NoError(t, newSvc(repo, nil).HandleEvent(context.Background(), core.EventEmailOpened, map[string]any{}), "an event nobody can receive is not delivered again")
 	assert.False(t, called)
+}
+
+func TestHandleEventReplayAndFailure(t *testing.T) {
+	t.Run("the same event again changes nothing", func(t *testing.T) {
+		pushed := 0
+		repo := &mocks.NotificationRepository{CreateFn: func(context.Context, *db.Notification) (*db.Notification, error) {
+			return nil, repositories.ErrConflict
+		}}
+		rt := realtimeFunc(func(context.Context, string, any) error { pushed++; return nil })
+		err := newSvc(repo, rt).HandleEvent(context.Background(), core.EventEmailOpened, map[string]any{"user_id": uid, core.EventIDKey: "evt-1"})
+		assert.NoError(t, err)
+		assert.Zero(t, pushed, "nothing is pushed a second time")
+	})
+	t.Run("a storage failure asks for one more delivery", func(t *testing.T) {
+		repo := &mocks.NotificationRepository{CreateFn: func(context.Context, *db.Notification) (*db.Notification, error) {
+			return nil, errors.New("database down")
+		}}
+		err := newSvc(repo, nil).HandleEvent(context.Background(), core.EventEmailOpened, map[string]any{"user_id": uid, core.EventIDKey: "evt-1"})
+		assert.Error(t, err)
+	})
+	t.Run("an event without an id is stored without one", func(t *testing.T) {
+		var got *db.Notification
+		repo := &mocks.NotificationRepository{CreateFn: func(ctx context.Context, n *db.Notification) (*db.Notification, error) {
+			got = n
+			return createEcho()(ctx, n)
+		}}
+		require.NoError(t, newSvc(repo, nil).HandleEvent(context.Background(), core.EventEmailOpened, map[string]any{"user_id": uid}))
+		require.NotNil(t, got)
+		assert.Nil(t, got.EventID)
+	})
+}
+
+type realtimeFunc func(ctx context.Context, userID string, payload any) error
+
+func (f realtimeFunc) Publish(ctx context.Context, userID string, payload any) error {
+	return f(ctx, userID, payload)
 }
