@@ -38,6 +38,8 @@ var alertOfType = map[string]string{
 	"email_opened":         AlertApplications,
 	"scheduled_email_sent": AlertApplications,
 	"new_matching_jobs":    AlertMatches,
+	"saved_job_closing":    AlertClosing,
+	"cv_tip":               AlertTips,
 }
 
 // AlertOfType returns the alert kind of a notification type, "" when the type is always delivered.

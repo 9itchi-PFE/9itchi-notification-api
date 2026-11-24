@@ -60,6 +60,50 @@ func scheduledOnly(payload map[string]any) bool {
 	return scheduled
 }
 
+// countOf reads payload.count: a JSON number, or an int when the event did not travel.
+func countOf(payload map[string]any) int {
+	switch n := payload["count"].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
+// hasCount keeps the events that count something: « 0 nouvelle offre » is not news.
+func hasCount(payload map[string]any) bool { return countOf(payload) > 0 }
+
+// closesOnADay keeps the closing reminders that name the offer and the day it closes.
+func closesOnADay(payload map[string]any) bool {
+	jobID, _ := payload["job_id"].(string)
+	day, _ := payload["closes_on"].(string)
+	_, err := time.Parse(time.DateOnly, day)
+	return uuidRe.MatchString(jobID) && err == nil
+}
+
+// tipsACV keeps the CV tips that name the CV and count what is left to correct.
+func tipsACV(payload map[string]any) bool {
+	resumeID, _ := payload["resume_id"].(string)
+	return uuidRe.MatchString(resumeID) && hasCount(payload)
+}
+
+// detailsOf reads from the stored data what the email of a notification names.
+func detailsOf(notifType string, data map[string]any) emailDetails {
+	d := emailDetails{Count: countOf(data)}
+	d.Company, _ = data["company"].(string)
+	d.JobTitle, _ = data["job_title"].(string)
+	switch notifType {
+	case emailClosing:
+		d.LinkID, _ = data["job_id"].(string)
+		day, _ := data["closes_on"].(string)
+		d.Day, _ = time.Parse(time.DateOnly, day)
+	case emailTips:
+		d.LinkID, _ = data["resume_id"].(string)
+	}
+	return d
+}
+
 // fromEvent builds an event handler: payload.user_id is the recipient, the rest of the payload is stored as data.
 // keep, when set, decides whether the event is worth telling. The user's alert settings then decide where it goes:
 // in 9itchi, by email, both or nowhere.
@@ -104,9 +148,7 @@ func (s *notificationService) fromEvent(notifType, title string, keep func(paylo
 			}
 		}
 		if choice.Email {
-			company, _ := data["company"].(string)
-			jobTitle, _ := data["job_title"].(string)
-			s.mail(ctx, userID, notifType, emailDetails{Company: company, JobTitle: jobTitle})
+			s.mail(ctx, userID, notifType, detailsOf(notifType, data))
 		}
 		return nil
 	}
@@ -183,7 +225,7 @@ func (s *notificationService) receiptEmail(ctx context.Context, payload map[stri
 		return nil
 	}
 	no, _ := payload["receipt_no"].(string)
-	s.mail(ctx, userID, emailReceipt, emailDetails{Millimes: int64(amount), ReceiptNo: no, PaymentID: paymentID})
+	s.mail(ctx, userID, emailReceipt, emailDetails{Millimes: int64(amount), ReceiptNo: no, LinkID: paymentID})
 	return nil
 }
 

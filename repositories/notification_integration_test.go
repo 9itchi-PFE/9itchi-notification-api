@@ -59,6 +59,10 @@ func TestNotificationRejectsUnknownType(t *testing.T) {
 	repo := NewNotificationRepository(newTestStore(t))
 	_, err := repo.Create(context.Background(), &db.Notification{UserID: userA, Type: "bogus", Title: "x"})
 	assert.Error(t, err)
+	for _, known := range []string{"new_matching_jobs", "saved_job_closing", "cv_tip"} {
+		_, err := repo.Create(context.Background(), &db.Notification{UserID: userA, Type: known, Title: "x"})
+		assert.NoError(t, err, known)
+	}
 }
 
 func TestNotificationOwnershipIsolation(t *testing.T) {
