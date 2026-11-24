@@ -34,17 +34,33 @@ func (a *AblyRealtime) Publish(ctx context.Context, userID string, payload any) 
 	return a.rest.Channels.Get(UserChannel(userID)).Publish(ctx, "notification", payload)
 }
 
+// PublisherClientID is the identity this service publishes under. An Ably app can require identified clients on
+// its channels; a publish made with the key alone is then refused (401, "requires an identified client").
+const PublisherClientID = "9itchi-notification-api"
+
 // NewRealtime is the Realtime factory: Ably when apiKey is set, else the no-op. The creator is nil without Ably.
 func NewRealtime(apiKey string) (Realtime, TokenRequestCreator) {
+	return newRealtime(apiKey)
+}
+
+// newRealtime builds two REST clients on the same key. The publisher is identified. Token requests are signed by a
+// client without an identity, so a token is only ever issued for the client id asked for, never for the service's.
+func newRealtime(apiKey string, extra ...ably.ClientOption) (Realtime, TokenRequestCreator) {
 	if apiKey == "" {
 		return NoopRealtime{}, nil
 	}
-	rest, err := ably.NewREST(ably.WithKey(apiKey), ably.WithLogHandler(redactingAblyLogger{apiKey: apiKey}))
+	opts := append([]ably.ClientOption{ably.WithKey(apiKey), ably.WithLogHandler(redactingAblyLogger{apiKey: apiKey})}, extra...)
+	signer, err := ably.NewREST(opts...)
 	if err != nil {
 		utils.Logger.Error("ably disabled: invalid ABLY_API_KEY")
 		return NoopRealtime{}, nil
 	}
-	return &AblyRealtime{rest: rest}, rest.Auth
+	publisher, err := ably.NewREST(append(opts[:len(opts):len(opts)], ably.WithClientID(PublisherClientID))...)
+	if err != nil {
+		utils.Logger.Error("ably disabled: invalid ABLY_API_KEY")
+		return NoopRealtime{}, nil
+	}
+	return &AblyRealtime{rest: publisher}, signer.Auth
 }
 
 var ablyKeyParam = regexp.MustCompile(`key=[^&\s"]+`)
