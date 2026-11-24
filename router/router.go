@@ -30,6 +30,8 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.PUT("/notifications/:id/read", handlers.MarkRead(services.Notification))
 		userGroup.PUT("/notifications/read-all", handlers.MarkAllRead(services.Notification))
 		userGroup.GET("/notifications/ably-token", handlers.AblyToken(services.Notification))
+		userGroup.GET("/notifications/preferences", handlers.GetAlertPreferences(services.Notification))
+		userGroup.PUT("/notifications/preferences", handlers.UpdateAlertPreferences(services.Notification))
 	}
 
 	// internal endpoints

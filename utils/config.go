@@ -31,6 +31,9 @@ type AppConfig struct {
 	MailgunRateLimit int
 	// Peer service base URLs.
 	AccountAPIURL string
+	EmailAPIURL   string
+	// FrontendURL is where the links of the emails lead (env FRONTEND_URL).
+	FrontendURL string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -53,6 +56,8 @@ func LoadConfig() AppConfig {
 		MailgunAPIBase:         getStringWithDefault("MAILGUN_API_BASE", ""),
 		MailgunRateLimit:       getIntWithDefault("MAILGUN_RATE_LIMIT", 10),
 		AccountAPIURL:          getStringWithDefault("ACCOUNT_API_URL", "http://9itchi-account-api:8081"),
+		EmailAPIURL:            getStringWithDefault("EMAIL_API_URL", "http://9itchi-email-api:8085"),
+		FrontendURL:            getStringWithDefault("FRONTEND_URL", "http://localhost:3000"),
 	}
 }
 

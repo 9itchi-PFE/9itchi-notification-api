@@ -126,3 +126,43 @@ func TestNotificationEventIDIsUnique(t *testing.T) {
 	_, err = repo.Create(ctx, &db.Notification{UserID: userA, Type: "system", Title: "b"})
 	require.NoError(t, err)
 }
+
+func TestAlertPreferences(t *testing.T) {
+	repo := NewPreferenceRepository(newTestStore(t))
+	ctx := context.Background()
+
+	none, err := repo.ListByUser(ctx, userA)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+	_, err = repo.Get(ctx, userA, "tips")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	require.NoError(t, repo.Upsert(ctx, userA, []db.AlertPreference{
+		{Kind: "tips", Email: true, InApp: false},
+		{Kind: "matches", Email: false, InApp: true},
+	}))
+	tips, err := repo.Get(ctx, userA, "tips")
+	require.NoError(t, err)
+	assert.True(t, tips.Email)
+	assert.False(t, tips.InApp)
+
+	// Choosing again replaces the choice; the other kinds and the other users are untouched.
+	require.NoError(t, repo.Upsert(ctx, userA, []db.AlertPreference{{Kind: "tips", Email: false, InApp: false}}))
+	rows, err := repo.ListByUser(ctx, userA)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	for _, r := range rows {
+		if r.Kind == "tips" {
+			assert.False(t, r.Email)
+		} else {
+			assert.Equal(t, "matches", r.Kind)
+			assert.True(t, r.InApp)
+		}
+	}
+	other, err := repo.ListByUser(ctx, userB)
+	require.NoError(t, err)
+	assert.Empty(t, other)
+
+	assert.Error(t, repo.Upsert(ctx, userA, []db.AlertPreference{{Kind: "payments", Email: true, InApp: true}}), "CHECK kind")
+	assert.NoError(t, repo.Upsert(ctx, userA, nil))
+}

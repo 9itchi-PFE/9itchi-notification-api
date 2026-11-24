@@ -15,6 +15,7 @@ import (
 	"github.com/ably/ably-go/ably"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newRouter(svc *mocks.NotificationService) *gin.Engine {
@@ -26,6 +27,8 @@ func newRouter(svc *mocks.NotificationService) *gin.Engine {
 	r.PUT("/notifications/read-all", MarkAllRead(svc))
 	r.GET("/notifications/ably-token", AblyToken(svc))
 	r.POST("/internal/notifications", SendNotification(svc))
+	r.GET("/notifications/preferences", GetAlertPreferences(svc))
+	r.PUT("/notifications/preferences", UpdateAlertPreferences(svc))
 	return r
 }
 
@@ -120,4 +123,47 @@ func TestAblyTokenHandler(t *testing.T) {
 	w = do(newRouter(svc), http.MethodGet, "/notifications/ably-token", "")
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), `"error":"realtime unavailable"`)
+}
+
+func TestAlertPreferencesHandlers(t *testing.T) {
+	var got api.UpdateAlertPreferencesRequest
+	svc := &mocks.NotificationService{
+		PrefsFn: func(_ context.Context, userID string) (*api.AlertPreferencesResponse, *models.ApiError) {
+			assert.Equal(t, "u1", userID)
+			return &api.AlertPreferencesResponse{Items: []api.AlertPreferenceResponse{{Kind: "tips", Email: false, InApp: true}}}, nil
+		},
+		SetPrefs: func(_ context.Context, userID string, req api.UpdateAlertPreferencesRequest) (*api.AlertPreferencesResponse, *models.ApiError) {
+			assert.Equal(t, "u1", userID)
+			got = req
+			return &api.AlertPreferencesResponse{Items: []api.AlertPreferenceResponse{{Kind: "tips", Email: true, InApp: false}}}, nil
+		},
+	}
+	r := newRouter(svc)
+
+	w := do(r, http.MethodGet, "/notifications/preferences", "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"items":[{"kind":"tips","email":false,"in_app":true}]}`, w.Body.String())
+
+	w = do(r, http.MethodPut, "/notifications/preferences", `{"items":[{"kind":"tips","email":true,"in_app":false}]}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, got.Items, 1)
+	assert.True(t, *got.Items[0].Email)
+	assert.False(t, *got.Items[0].InApp, "false is a choice, not a missing field")
+
+	for _, body := range []string{
+		`{`, `{}`, `{"items":[]}`,
+		`{"items":[{"kind":"payments","email":true,"in_app":true}]}`,
+		`{"items":[{"kind":"tips","email":true}]}`,
+		`{"items":[{"kind":"tips","in_app":true}]}`,
+	} {
+		w = do(r, http.MethodPut, "/notifications/preferences", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code, body)
+		assert.Contains(t, w.Body.String(), `"error"`)
+	}
+
+	failing := newRouter(&mocks.NotificationService{PrefsFn: func(context.Context, string) (*api.AlertPreferencesResponse, *models.ApiError) {
+		return nil, &models.ApiError{Code: http.StatusInternalServerError, Error: errors.New("internal server error")}
+	}})
+	w = do(failing, http.MethodGet, "/notifications/preferences", "")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -52,6 +51,10 @@ type NotificationService interface {
 	AblyToken(ctx context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError)
 	// POST /internal/notifications: store, deliver through channels, publish realtime
 	SendNotification(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError)
+	// GET /notifications/preferences: where each kind of alert goes for the caller (email, in 9itchi)
+	GetAlertPreferences(ctx context.Context, userID string) (*api.AlertPreferencesResponse, *models.ApiError)
+	// PUT /notifications/preferences: change the choice for the kinds given; the others keep theirs
+	UpdateAlertPreferences(ctx context.Context, userID string, req api.UpdateAlertPreferencesRequest) (*api.AlertPreferencesResponse, *models.ApiError)
 	// HandleEvent turns a domain event (core.Event*) into a notification. Unknown events are ignored. An error means
 	// the event could not be stored and is worth one more delivery; an event that can never be handled returns nil.
 	HandleEvent(ctx context.Context, event string, payload map[string]any) error
@@ -60,8 +63,11 @@ type NotificationService interface {
 // EventsQueue is the durable queue the service reads its events from.
 const EventsQueue = "notification-api.events"
 
-// HandledEvents are the events the service turns into notifications: the routing keys of its queue.
-var HandledEvents = []string{core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched}
+// HandledEvents are the events the service acts on: the routing keys of its queue.
+var HandledEvents = []string{
+	core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched,
+	core.EventPaymentCompleted, core.EventUserRegistered,
+}
 
 type notificationService struct {
 	repo     repositories.NotificationRepository
@@ -69,57 +75,24 @@ type notificationService struct {
 	realtime core.Realtime
 	tokens   core.TokenRequestCreator // nil when Ably is not configured
 	events   map[string]func(ctx context.Context, payload map[string]any) error
+	alerts   AlertDeps
 }
 
-func NewNotificationService(repo repositories.NotificationRepository, channels core.ChannelFactory, realtime core.Realtime, tokens core.TokenRequestCreator) NotificationService {
+func NewNotificationService(repo repositories.NotificationRepository, channels core.ChannelFactory, realtime core.Realtime, tokens core.TokenRequestCreator, opts ...Option) NotificationService {
 	s := &notificationService{repo: repo, channels: channels, realtime: realtime, tokens: tokens}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.events = map[string]func(ctx context.Context, payload map[string]any) error{
 		core.EventEmailOpened: s.fromEvent("email_opened", "Your email was opened", nil),
 		// A send the student clicked shows its result on the screen: only what the scheduler did is news.
-		core.EventEmailSent:   s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
-		core.EventEmailFailed: s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
-		core.EventJobsMatched: s.fromEvent("new_matching_jobs", "New jobs match your profile", nil),
+		core.EventEmailSent:        s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
+		core.EventEmailFailed:      s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
+		core.EventJobsMatched:      s.fromEvent("new_matching_jobs", "New jobs match your profile", nil),
+		core.EventPaymentCompleted: s.receiptEmail,
+		core.EventUserRegistered:   s.welcomeEmail,
 	}
 	return s
-}
-
-// scheduledOnly keeps the events of an email sent by the scheduler.
-func scheduledOnly(payload map[string]any) bool {
-	scheduled, _ := payload["scheduled"].(bool)
-	return scheduled
-}
-
-// fromEvent builds an event handler: payload.user_id is the recipient, the rest of the payload is stored as data.
-// keep, when set, decides whether the event is worth a notification.
-func (s *notificationService) fromEvent(notifType, title string, keep func(payload map[string]any) bool) func(ctx context.Context, payload map[string]any) error {
-	return func(ctx context.Context, payload map[string]any) error {
-		if keep != nil && !keep(payload) {
-			return nil
-		}
-		userID, _ := payload["user_id"].(string)
-		data := make(map[string]any, len(payload))
-		for k, v := range payload {
-			if k != "user_id" && k != core.EventIDKey {
-				data[k] = v
-			}
-		}
-		var eventID *string
-		if id, _ := payload[core.EventIDKey].(string); id != "" {
-			eventID = &id
-		}
-		req := api.SendNotificationRequest{UserID: userID, Type: notifType, Title: title, Data: data}
-		_, apiErr := s.send(ctx, req, eventID)
-		switch {
-		case apiErr == nil:
-			return nil
-		case apiErr.Code >= http.StatusInternalServerError:
-			return fmt.Errorf("notification for %s not stored", notifType)
-		default:
-			// A payload that is refused today is refused tomorrow: delivering it again changes nothing.
-			utils.Logger.Warn("event ignored", zap.String("type", notifType), zap.Int("status", apiErr.Code))
-			return nil
-		}
-	}
 }
 
 func (s *notificationService) HandleEvent(ctx context.Context, event string, payload map[string]any) error {

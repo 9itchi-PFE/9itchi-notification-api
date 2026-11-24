@@ -3,7 +3,7 @@
 In-app notifications delivered over Ably, optional email/push channels. Consumes events.
 
 ## Stack
-Go, Gin, PostgreSQL (db `notifications`, pgx + goose migrations), Viper config, Zap logger. Peers over HTTP (`pkg/`): account. Events over RabbitMQ (names in `core/events.go`).
+Go, Gin, PostgreSQL (db `notifications`, pgx + goose migrations), Viper config, Zap logger. Peers over HTTP (`pkg/`): account, email. Events over RabbitMQ (names in `core/events.go`).
 
 ## Layout
 `main.go`, `app/` (init order: config, repositories, services, router), `router/` (routes + middleware), `handlers/` (thin) -> `services/` (logic) -> `repositories/` (Postgres only), `core/` (interfaces/factories), `models/{api,db,mapping}`, `pkg/` (peer clients), `utils/` (config, logger).
