@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"9itchi-notification-api/core"
 	"9itchi-notification-api/models"
@@ -247,4 +248,22 @@ func (s *notificationService) UpdateAlertPreferences(ctx context.Context, userID
 		return nil, internalError("save alert preferences", err)
 	}
 	return s.GetAlertPreferences(ctx, userID)
+}
+
+// renewalEmail reminds a student whose subscription ends soon, or ended without a renewal. Nothing is charged
+// automatically, so this reminder is what keeps a subscription going: it is sent whatever the alert settings say.
+// payments-api raises it once per period; a subscription the student stopped is never reminded.
+func (s *notificationService) renewalEmail(ctx context.Context, payload map[string]any) error {
+	userID, _ := payload["user_id"].(string)
+	stage, _ := payload["stage"].(string)
+	price, _ := payload["price_millimes"].(float64) // JSON numbers
+	endsAt, _ := payload["ends_at"].(string)
+	day, err := time.Parse(time.RFC3339, endsAt)
+	kind := map[string]string{"due": emailRenewalDue, "lapsed": emailRenewalLapsed}[stage]
+	if !uuidRe.MatchString(userID) || kind == "" || err != nil || price <= 0 {
+		utils.Logger.Warn("event ignored: renewal reminder without a user, a stage, a day or a price")
+		return nil
+	}
+	s.mail(ctx, userID, kind, emailDetails{Millimes: int64(price), Day: day})
+	return nil
 }

@@ -66,7 +66,7 @@ const EventsQueue = "notification-api.events"
 // HandledEvents are the events the service acts on: the routing keys of its queue.
 var HandledEvents = []string{
 	core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched,
-	core.EventPaymentCompleted, core.EventUserRegistered,
+	core.EventPaymentCompleted, core.EventUserRegistered, core.EventSubscriptionRenewalDue,
 }
 
 type notificationService struct {
@@ -86,11 +86,12 @@ func NewNotificationService(repo repositories.NotificationRepository, channels c
 	s.events = map[string]func(ctx context.Context, payload map[string]any) error{
 		core.EventEmailOpened: s.fromEvent("email_opened", "Your email was opened", nil),
 		// A send the student clicked shows its result on the screen: only what the scheduler did is news.
-		core.EventEmailSent:        s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
-		core.EventEmailFailed:      s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
-		core.EventJobsMatched:      s.fromEvent("new_matching_jobs", "New jobs match your profile", nil),
-		core.EventPaymentCompleted: s.receiptEmail,
-		core.EventUserRegistered:   s.welcomeEmail,
+		core.EventEmailSent:              s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
+		core.EventEmailFailed:            s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
+		core.EventJobsMatched:            s.fromEvent("new_matching_jobs", "New jobs match your profile", nil),
+		core.EventPaymentCompleted:       s.receiptEmail,
+		core.EventUserRegistered:         s.welcomeEmail,
+		core.EventSubscriptionRenewalDue: s.renewalEmail,
 	}
 	return s
 }
