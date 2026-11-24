@@ -20,6 +20,15 @@ type AppConfig struct {
 	// InternalAPIKeyRequired (env INTERNAL_API_KEY_REQUIRED, default true); false = log and allow.
 	InternalAPIKeyRequired bool
 	RabbitMQURL            string
+	// AblyAPIKey (env ABLY_API_KEY, optional) enables live push and the token endpoint. Never log it.
+	AblyAPIKey string
+	// Mailgun (all optional, never log): the email channel is enabled only when MailgunAPIKey and MailgunDomain are set.
+	// MailgunAPIBase empty = US region; https://api.eu.mailgun.net for EU. MailgunFromEmail empty = "9itchi <no-reply@DOMAIN>".
+	MailgunAPIKey    string
+	MailgunDomain    string
+	MailgunFromEmail string
+	MailgunAPIBase   string
+	MailgunRateLimit int
 	// Peer service base URLs.
 	AccountAPIURL string
 }
@@ -36,6 +45,12 @@ func LoadConfig() AppConfig {
 		InternalAPIKey:         getStringWithDefault("INTERNAL_API_KEY", ""),
 		InternalAPIKeyRequired: getBoolWithDefault("INTERNAL_API_KEY_REQUIRED", true),
 		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		AblyAPIKey:             getStringWithDefault("ABLY_API_KEY", ""),
+		MailgunAPIKey:          getStringWithDefault("MAILGUN_API_KEY", ""),
+		MailgunDomain:          getStringWithDefault("MAILGUN_DOMAIN", ""),
+		MailgunFromEmail:       getStringWithDefault("MAILGUN_FROM_EMAIL", ""),
+		MailgunAPIBase:         getStringWithDefault("MAILGUN_API_BASE", ""),
+		MailgunRateLimit:       getIntWithDefault("MAILGUN_RATE_LIMIT", 10),
 		AccountAPIURL:          getStringWithDefault("ACCOUNT_API_URL", "http://9itchi-account-api:8081"),
 	}
 }

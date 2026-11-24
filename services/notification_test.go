@@ -13,6 +13,7 @@ import (
 	"9itchi-notification-api/repositories"
 	"9itchi-notification-api/services/mocks"
 
+	"github.com/ably/ably-go/ably"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,7 @@ func (f fakeChannel) Send(_ context.Context, _, _ string, _ map[string]any) erro
 }
 
 func newSvc(repo *mocks.NotificationRepository, rt core.Realtime) NotificationService {
-	return NewNotificationService(repo, core.NewChannelFactory(), rt)
+	return NewNotificationService(repo, core.NewChannelFactory(), rt, nil)
 }
 
 func createEcho() func(context.Context, *db.Notification) (*db.Notification, error) {
@@ -93,13 +94,49 @@ func TestSendNotificationDeliveryFailuresDoNotFail(t *testing.T) {
 	repo := &mocks.NotificationRepository{CreateFn: createEcho()}
 	factory := core.ChannelFactory{"fake": func() core.Channel { return fakeChannel{sent: &sent} }}
 	rt := &fakeRealtime{err: errors.New("ably down")}
-	svc := NewNotificationService(repo, factory, rt)
+	svc := NewNotificationService(repo, factory, rt, nil)
 
-	res, apiErr := svc.SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t"})
+	res, apiErr := svc.SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t", Channels: []string{"fake"}})
 	require.Nil(t, apiErr)
 	assert.NotNil(t, res)
 	assert.Equal(t, 1, sent)
 	assert.Len(t, rt.calls, 1)
+
+	sent = 0
+	_, apiErr = svc.SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t", Channels: []string{"fake", "fake"}})
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, sent, "duplicate channels are delivered once")
+}
+
+func TestSendNotificationStoredWhenEmailChannelFails(t *testing.T) {
+	repo := &mocks.NotificationRepository{CreateFn: createEcho()}
+	factory := core.NewChannelFactory()
+	factory.RegisterEmail(core.EmailConfig{APIKey: "key", Domain: "mg.example.com"}, func(context.Context, string) (string, error) {
+		return "", errors.New("account down")
+	})
+	require.Contains(t, factory, core.ChannelEmail)
+
+	res, apiErr := NewNotificationService(repo, factory, &fakeRealtime{}, nil).SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t", Channels: []string{core.ChannelEmail}})
+	require.Nil(t, apiErr)
+	assert.Equal(t, nid, res.ID)
+}
+
+func TestSendNotificationOnlyUsesRequestedChannels(t *testing.T) {
+	resolved := 0
+	factory := core.NewChannelFactory()
+	factory.RegisterEmail(core.EmailConfig{APIKey: "key", Domain: "mg.example.com"}, func(context.Context, string) (string, error) {
+		resolved++
+		return "", errors.New("stop")
+	})
+	svc := NewNotificationService(&mocks.NotificationRepository{CreateFn: createEcho()}, factory, nil, nil)
+
+	_, apiErr := svc.SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t"})
+	require.Nil(t, apiErr)
+	assert.Zero(t, resolved, "email is opt-in")
+
+	_, apiErr = svc.SendNotification(context.Background(), api.SendNotificationRequest{UserID: uid, Type: "system", Title: "t", Channels: []string{"sms"}})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 }
 
 func TestListNotifications(t *testing.T) {
@@ -186,10 +223,53 @@ func TestMarkAllRead(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
 }
 
-func TestAblyTokenNotImplemented(t *testing.T) {
-	_, apiErr := newSvc(&mocks.NotificationRepository{}, nil).AblyToken(context.Background(), uid)
-	require.NotNil(t, apiErr)
-	assert.Equal(t, http.StatusNotImplemented, apiErr.Code)
+type fakeTokens struct {
+	params *ably.TokenParams
+	err    error
+}
+
+func (f *fakeTokens) CreateTokenRequest(params *ably.TokenParams, _ ...ably.AuthOption) (*ably.TokenRequest, error) {
+	f.params = params
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &ably.TokenRequest{TokenParams: *params, KeyName: "app.key"}, nil
+}
+
+func TestAblyToken(t *testing.T) {
+	newTokenSvc := func(tokens core.TokenRequestCreator) NotificationService {
+		return NewNotificationService(&mocks.NotificationRepository{}, core.NewChannelFactory(), nil, tokens)
+	}
+
+	t.Run("scoped to the caller channel, subscribe only", func(t *testing.T) {
+		tokens := &fakeTokens{}
+		res, apiErr := newTokenSvc(tokens).AblyToken(context.Background(), uid)
+		require.Nil(t, apiErr)
+		assert.JSONEq(t, `{"user:`+uid+`":["subscribe"]}`, res.Capability)
+		assert.Equal(t, uid, tokens.params.ClientID)
+		assert.Equal(t, (30 * time.Minute).Milliseconds(), tokens.params.TTL)
+		assert.Equal(t, "app.key", res.KeyName)
+	})
+
+	t.Run("unavailable without ably", func(t *testing.T) {
+		_, apiErr := newTokenSvc(nil).AblyToken(context.Background(), uid)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusServiceUnavailable, apiErr.Code)
+		assert.EqualError(t, apiErr.Error, "realtime unavailable")
+	})
+
+	t.Run("invalid user id", func(t *testing.T) {
+		_, apiErr := newTokenSvc(&fakeTokens{}).AblyToken(context.Background(), "x")
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	})
+
+	t.Run("creator error is a generic 500", func(t *testing.T) {
+		_, apiErr := newTokenSvc(&fakeTokens{err: errors.New("key=secret")}).AblyToken(context.Background(), uid)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
+		assert.EqualError(t, apiErr.Error, "internal server error")
+	})
 }
 
 func TestHandleEvent(t *testing.T) {

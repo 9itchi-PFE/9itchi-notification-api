@@ -12,6 +12,7 @@ import (
 	"9itchi-notification-api/models/api"
 	"9itchi-notification-api/services/mocks"
 
+	"github.com/ably/ably-go/ably"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
@@ -105,10 +106,18 @@ func TestSendNotificationHandler(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "invalid notification type")
 }
 
-func TestAblyTokenHandlerNotImplemented(t *testing.T) {
-	svc := &mocks.NotificationService{AblyFunc: func(context.Context, string) (*api.AblyTokenResponse, *models.ApiError) {
-		return nil, models.NotImplemented()
+func TestAblyTokenHandler(t *testing.T) {
+	svc := &mocks.NotificationService{AblyFunc: func(_ context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError) {
+		return &api.AblyTokenResponse{TokenParams: ably.TokenParams{Capability: `{"user:` + userID + `":["subscribe"]}`, ClientID: userID}, KeyName: "app.key"}, nil
 	}}
 	w := do(newRouter(svc), http.MethodGet, "/notifications/ably-token", "")
-	assert.Equal(t, http.StatusNotImplemented, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"capability":"{\"user:u1\":[\"subscribe\"]}","clientId":"u1","keyName":"app.key"}`, w.Body.String())
+
+	svc.AblyFunc = func(context.Context, string) (*api.AblyTokenResponse, *models.ApiError) {
+		return nil, &models.ApiError{Code: http.StatusServiceUnavailable, Error: errors.New("realtime unavailable")}
+	}
+	w = do(newRouter(svc), http.MethodGet, "/notifications/ably-token", "")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), `"error":"realtime unavailable"`)
 }

@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/ably/ably-go/ably"
+)
 
 // SendNotificationRequest is the validated body of SendNotification.
 type SendNotificationRequest struct {
@@ -8,6 +12,8 @@ type SendNotificationRequest struct {
 	Type   string         `json:"type" binding:"required,max=50"`
 	Title  string         `json:"title" binding:"required,max=200"`
 	Data   map[string]any `json:"data"`
+	// Channels lists extra delivery channels (e.g. "email"); in-app is always used.
+	Channels []string `json:"channels" binding:"omitempty,max=5,dive,max=20"`
 }
 
 // NotificationResponse is one notification.
@@ -35,10 +41,8 @@ type MarkAllReadResponse struct {
 	Updated int64 `json:"updated"`
 }
 
-// AblyTokenResponse is the scoped Ably token request (not implemented yet).
-type AblyTokenResponse struct {
-	TokenRequest map[string]any `json:"token_request"`
-}
+// AblyTokenResponse is the signed Ably TokenRequest, returned as-is so the Ably client can use it as authUrl output.
+type AblyTokenResponse = ably.TokenRequest
 
 // ListNotificationsQuery holds the query-string filters of ListNotifications.
 type ListNotificationsQuery struct {

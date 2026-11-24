@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
+	"time"
 
 	"9itchi-notification-api/core"
 	"9itchi-notification-api/models"
@@ -14,12 +16,15 @@ import (
 	"9itchi-notification-api/repositories"
 	"9itchi-notification-api/utils"
 
+	"github.com/ably/ably-go/ably"
 	"go.uber.org/zap"
 )
 
 const (
 	defaultPageSize = 20
 	maxPageSize     = 100
+	// ablyTokenTTL keeps tokens short; the client renews through the endpoint.
+	ablyTokenTTL = 30 * time.Minute
 )
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -42,7 +47,7 @@ type NotificationService interface {
 	MarkRead(ctx context.Context, userID string, id string) (*api.NotificationResponse, *models.ApiError)
 	// PUT /notifications/read-all: mark all as read
 	MarkAllRead(ctx context.Context, userID string) (*api.MarkAllReadResponse, *models.ApiError)
-	// GET /notifications/ably-token: scoped Ably token request for user:{id} channels
+	// GET /notifications/ably-token: subscribe-only Ably token request for the caller's user:{id} channel (503 when Ably is not configured)
 	AblyToken(ctx context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError)
 	// POST /internal/notifications: store, deliver through channels, publish realtime
 	SendNotification(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError)
@@ -54,11 +59,12 @@ type notificationService struct {
 	repo     repositories.NotificationRepository
 	channels core.ChannelFactory
 	realtime core.Realtime
+	tokens   core.TokenRequestCreator // nil when Ably is not configured
 	events   map[string]func(ctx context.Context, payload map[string]any)
 }
 
-func NewNotificationService(repo repositories.NotificationRepository, channels core.ChannelFactory, realtime core.Realtime) NotificationService {
-	s := &notificationService{repo: repo, channels: channels, realtime: realtime}
+func NewNotificationService(repo repositories.NotificationRepository, channels core.ChannelFactory, realtime core.Realtime, tokens core.TokenRequestCreator) NotificationService {
+	s := &notificationService{repo: repo, channels: channels, realtime: realtime, tokens: tokens}
 	s.events = map[string]func(ctx context.Context, payload map[string]any){
 		core.EventEmailOpened: s.fromEvent("email_opened", "Your email was opened"),
 		core.EventEmailSent:   s.fromEvent("scheduled_email_sent", "Your scheduled email was sent"),
@@ -146,8 +152,26 @@ func (s *notificationService) MarkAllRead(ctx context.Context, userID string) (*
 	return &api.MarkAllReadResponse{Updated: updated}, nil
 }
 
-func (s *notificationService) AblyToken(_ context.Context, _ string) (*api.AblyTokenResponse, *models.ApiError) {
-	return nil, models.NotImplemented()
+func (s *notificationService) AblyToken(_ context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError) {
+	if s.tokens == nil {
+		return nil, &models.ApiError{Code: http.StatusServiceUnavailable, Error: errors.New("realtime unavailable")}
+	}
+	if !uuidRe.MatchString(userID) {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user id")}
+	}
+	capability, err := json.Marshal(map[string][]string{core.UserChannel(userID): {"subscribe"}})
+	if err != nil {
+		return nil, internalError("build ably capability", err)
+	}
+	req, err := s.tokens.CreateTokenRequest(&ably.TokenParams{
+		TTL:        ablyTokenTTL.Milliseconds(),
+		Capability: string(capability),
+		ClientID:   userID,
+	})
+	if err != nil {
+		return nil, internalError("create ably token request", err)
+	}
+	return req, nil
 }
 
 func (s *notificationService) SendNotification(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError) {
@@ -160,19 +184,35 @@ func (s *notificationService) SendNotification(ctx context.Context, req api.Send
 	if req.Title == "" || len(req.Title) > 200 {
 		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid title")}
 	}
+	names := []string{core.ChannelInApp}
+	seen := map[string]bool{core.ChannelInApp: true}
+	for _, name := range req.Channels {
+		if _, ok := s.channels[name]; !ok {
+			return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("unsupported channel")}
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
 	n, err := s.repo.Create(ctx, &db.Notification{UserID: req.UserID, Type: req.Type, Title: req.Title, Data: req.Data})
 	if err != nil {
 		return nil, internalError("create notification", err)
 	}
 	res := mapping.NotificationToResponse(n)
-	for name, newChannel := range s.channels {
-		if err := newChannel().Send(ctx, n.UserID, n.Title, res.Data); err != nil {
-			utils.Logger.Warn("channel delivery failed", zap.String("channel", name))
-		}
-	}
+	// The live push goes first so a slow channel (email) never delays it.
 	if s.realtime != nil {
 		if err := s.realtime.Publish(ctx, n.UserID, res); err != nil {
 			utils.Logger.Warn("realtime publish failed")
+		}
+	}
+	for _, name := range names {
+		newChannel, ok := s.channels[name]
+		if !ok {
+			continue
+		}
+		if err := newChannel().Send(ctx, n.UserID, n.Title, res.Data); err != nil {
+			utils.Logger.Warn("channel delivery failed", zap.String("channel", name))
 		}
 	}
 	return &res, nil

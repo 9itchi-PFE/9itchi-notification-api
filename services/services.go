@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+
 	"9itchi-notification-api/core"
 	"9itchi-notification-api/pkg/account"
 	"9itchi-notification-api/repositories"
@@ -19,10 +21,24 @@ type Clients struct {
 }
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
+	realtime, tokens := core.NewRealtime(config.AblyAPIKey)
+	accountClient := account.New(config.AccountAPIURL, config.InternalAPIKey)
+	channels := core.NewChannelFactory()
+	channels.RegisterEmail(core.EmailConfig{
+		APIKey:        config.MailgunAPIKey,
+		Domain:        config.MailgunDomain,
+		From:          config.MailgunFromEmail,
+		APIBase:       config.MailgunAPIBase,
+		RatePerSecond: config.MailgunRateLimit,
+	}, func(ctx context.Context, userID string) (string, error) {
+		u, err := accountClient.GetUser(ctx, userID)
+		if err != nil {
+			return "", err
+		}
+		return u.Email, nil
+	})
 	return &Services{
-		Notification: NewNotificationService(repos.Notification, core.NewChannelFactory(), core.NoopRealtime{}),
-		Clients: &Clients{
-			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
-		},
+		Notification: NewNotificationService(repos.Notification, channels, realtime, tokens),
+		Clients:      &Clients{Account: accountClient},
 	}
 }
