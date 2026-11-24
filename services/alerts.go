@@ -88,6 +88,13 @@ func tipsACV(payload map[string]any) bool {
 	return uuidRe.MatchString(resumeID) && hasCount(payload)
 }
 
+// endsOnADay keeps the gifts that say until when the subscription now runs.
+func endsOnADay(payload map[string]any) bool {
+	endsAt, _ := payload["ends_at"].(string)
+	_, err := time.Parse(time.RFC3339, endsAt)
+	return err == nil
+}
+
 // detailsOf reads from the stored data what the email of a notification names.
 func detailsOf(notifType string, data map[string]any) emailDetails {
 	d := emailDetails{Count: countOf(data)}
@@ -100,6 +107,9 @@ func detailsOf(notifType string, data map[string]any) emailDetails {
 		d.Day, _ = time.Parse(time.DateOnly, day)
 	case emailTips:
 		d.LinkID, _ = data["resume_id"].(string)
+	case emailGift:
+		endsAt, _ := data["ends_at"].(string)
+		d.Day, _ = time.Parse(time.RFC3339, endsAt)
 	}
 	return d
 }

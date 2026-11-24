@@ -23,6 +23,8 @@ const (
 	EventJobClosingSoon = "job.closing_soon"
 	// EventCVTips: the check of a student's CV still finds points to correct (resume-api, once a week at most).
 	EventCVTips = "cv.tips"
+	// EventSubscriptionGifted: the team gave a student free days of a plan (payments-api); ends_at is the new end.
+	EventSubscriptionGifted = "subscription.gifted"
 )
 
 // Publisher sends domain events. Swap LogPublisher for a RabbitMQ implementation without touching services.

@@ -16,7 +16,7 @@ Port `8087`, health `/health`. Notifications are stored in PostgreSQL. Live push
 | PUT | `/notifications/preferences` | user | UpdateAlertPreferences (`items`: the kinds to change; the others keep their choice) |
 | POST | `/internal/notifications` | internal | SendNotification (`user_id`, `type`, `title`, `data`, optional `channels`) |
 
-Types: `email_opened`, `scheduled_email_sent`, `email_failed`, `new_matching_jobs`, `saved_job_closing`, `cv_tip`, `admin_message`, `system`.
+Types: `email_opened`, `scheduled_email_sent`, `email_failed`, `new_matching_jobs`, `saved_job_closing`, `cv_tip`, `month_gifted`, `admin_message`, `system`.
 
 ## Events (RabbitMQ)
 
@@ -30,6 +30,7 @@ Optional. With `RABBITMQ_URL` set, the service reads the durable queue `notifica
 | `jobs.matched` with `count` above 0 | notification `new_matching_jobs` + email « 4 nouvelles offres pour toi », by the user's choice for `matches` (job-api, one a day at most) |
 | `job.closing_soon` with `job_id` and `closes_on` | notification `saved_job_closing` + email « Acme : l’offre ferme le 3 décembre 2026 », by the user's choice for `closing` (job-api, once per saved offer) |
 | `cv.tips` with `resume_id` and `count` above 0 | notification `cv_tip` + email « 3 points à corriger sur ton CV », by the user's choice for `tips` (resume-api, once a week at most) |
+| `subscription.gifted` with `ends_at` | notification `month_gifted` + email « Un mois offert par l’équipe 9itchi », always (payments-api, when an admin gives a month) |
 | `payment.completed` | the receipt by email, always (nothing for a payment of 0) |
 | `user.registered` | the welcome email, always |
 | `subscription.renewal_due` | the renewal reminder by email, always: `stage` `due` (the period ends soon) or `lapsed` (it ended without a renewal) |

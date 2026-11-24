@@ -10,7 +10,7 @@ import (
 )
 
 // The emails 9itchi sends, by kind. The first six follow a notification type, so the alert settings decide whether
-// they leave; the others are sent whatever the settings say (a receipt, a welcome, a renewal reminder).
+// they leave; the others are sent whatever the settings say (a month given, a receipt, a welcome, a renewal reminder).
 const (
 	emailOpened        = "email_opened"
 	emailScheduledSent = "scheduled_email_sent"
@@ -18,6 +18,7 @@ const (
 	emailMatches       = "new_matching_jobs"
 	emailClosing       = "saved_job_closing"
 	emailTips          = "cv_tip"
+	emailGift          = "month_gifted"
 	emailReceipt       = "receipt"
 	emailWelcome       = "welcome"
 	emailRenewalDue    = "renewal_due"
@@ -127,6 +128,17 @@ var emailCatalog = map[string]map[string]emailWords{
 			Text:    "ما زال فحص سيرتك الذاتية يجد نقاطًا للتصحيح (العدد: {count}). افتحه لرؤيتها وتصحيحها واحدة تلو الأخرى.",
 			TextOne: "ما زال فحص سيرتك الذاتية يجد نقطة واحدة للتصحيح. افتحه لرؤيتها وتصحيحها.",
 			Button:  "فحص سيرتي الذاتية", path: "/resumes/{id}/check"},
+	},
+	emailGift: {
+		"fr": {Category: "Abonnement", Subject: "Un mois offert par l’équipe 9itchi",
+			Text:   "L’équipe 9itchi t’offre un mois : ton abonnement va maintenant jusqu’au {date}. Tu n’as rien à payer.",
+			Button: "Voir mon abonnement", path: "/settings/billing"},
+		"en": {Category: "Subscription", Subject: "A month given by the 9itchi team",
+			Text:   "The 9itchi team gives you a month: your subscription now runs until {date}. There is nothing to pay.",
+			Button: "See my subscription", path: "/settings/billing"},
+		"ar": {Category: "الاشتراك", Subject: "شهر هدية من فريق 9itchi",
+			Text:   "يهديك فريق 9itchi شهرًا: اشتراكك يمتد الآن حتى {date}. لا شيء عليك دفعه.",
+			Button: "عرض اشتراكي", path: "/settings/billing"},
 	},
 	emailReceipt: {
 		"fr": {Category: "Paiement", Subject: "Ton reçu 9itchi · {amount} TND",
