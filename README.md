@@ -2,7 +2,7 @@
 
 In-app notifications delivered over Ably, optional email/push channels. Consumes events.
 
-Port `8087`, health `/health`. Notifications are stored in PostgreSQL. Live push and the token endpoint use Ably when `ABLY_API_KEY` is set; without it `core.Realtime` is a no-op and `GET /notifications/ably-token` returns `503` `{"error":"realtime unavailable"}`. A publish failure never blocks the stored notification.
+Port `8087`, health `/health`. Notifications are stored in PostgreSQL. Live push and the token endpoint use Ably when `ABLY_API_KEY` is set; without it `core.Realtime` is a no-op and `GET /notifications/ably-token` returns `503` `{"error":"realtime unavailable"}`. A publish failure never blocks the stored notification. The service publishes under its own Ably client id (`core.PublisherClientID`), because the Ably app requires identified clients; the tokens it signs are for the caller only.
 
 ## Endpoints
 
