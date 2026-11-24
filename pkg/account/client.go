@@ -33,6 +33,8 @@ type User struct {
 	Email  string `json:"email"`
 	Role   string `json:"role"`
 	Status string `json:"status"`
+	// Language is the language to write to the user in (fr, en or ar); empty from an older account-api.
+	Language string `json:"language"`
 }
 
 // GetUser fetches a user by UUID through GET /internal/users/:id.

@@ -101,15 +101,37 @@ func newEmailChannel(sender mailSender, from string, ratePerSecond int, resolve 
 func (c *EmailChannel) Send(ctx context.Context, userID, title string, data map[string]any) error {
 	ctx, cancelAll := context.WithTimeout(ctx, emailTotalTimeout)
 	defer cancelAll()
-	title = headerSafe.Replace(title)
 	to, err := c.resolve(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("resolve recipient: %w", err)
 	}
+	text, htmlBody := renderEmail(headerSafe.Replace(title), data)
+	return c.Mail(ctx, to, title, text, htmlBody)
+}
+
+// Mailer sends one email that is already written to one address. Never log the address.
+type Mailer interface {
+	Mail(ctx context.Context, to, subject, text, htmlBody string) error
+}
+
+// Mailer returns the email channel as a Mailer, nil when Mailgun is not configured.
+func (f ChannelFactory) Mailer() Mailer {
+	newChannel, ok := f[ChannelEmail]
+	if !ok {
+		return nil
+	}
+	m, _ := newChannel().(Mailer)
+	return m
+}
+
+// Mail sends one written email, with the same limits and retries as Send.
+func (c *EmailChannel) Mail(ctx context.Context, to, subject, text, htmlBody string) error {
+	ctx, cancelAll := context.WithTimeout(ctx, emailTotalTimeout)
+	defer cancelAll()
+	title := headerSafe.Replace(subject)
 	if to == "" {
 		return errors.New("resolve recipient: no email address")
 	}
-	text, htmlBody := renderEmail(title, data)
 
 	var lastErr error
 	for attempt := 1; attempt <= emailMaxAttempts; attempt++ {

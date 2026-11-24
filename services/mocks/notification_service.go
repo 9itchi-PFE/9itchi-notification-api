@@ -15,6 +15,16 @@ type NotificationService struct {
 	SendFn   func(ctx context.Context, req api.SendNotificationRequest) (*api.NotificationResponse, *models.ApiError)
 	EventFn  func(ctx context.Context, event string, payload map[string]any) error
 	AblyFunc func(ctx context.Context, userID string) (*api.AblyTokenResponse, *models.ApiError)
+	PrefsFn  func(ctx context.Context, userID string) (*api.AlertPreferencesResponse, *models.ApiError)
+	SetPrefs func(ctx context.Context, userID string, req api.UpdateAlertPreferencesRequest) (*api.AlertPreferencesResponse, *models.ApiError)
+}
+
+func (m *NotificationService) GetAlertPreferences(ctx context.Context, userID string) (*api.AlertPreferencesResponse, *models.ApiError) {
+	return m.PrefsFn(ctx, userID)
+}
+
+func (m *NotificationService) UpdateAlertPreferences(ctx context.Context, userID string, req api.UpdateAlertPreferencesRequest) (*api.AlertPreferencesResponse, *models.ApiError) {
+	return m.SetPrefs(ctx, userID, req)
 }
 
 func (m *NotificationService) ListNotifications(ctx context.Context, userID string, q api.ListNotificationsQuery) (*api.NotificationListResponse, *models.ApiError) {

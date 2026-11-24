@@ -79,3 +79,32 @@ func SendNotification(svc services.NotificationService) gin.HandlerFunc {
 		c.JSON(http.StatusCreated, result)
 	}
 }
+
+// GetAlertPreferences: GET /notifications/preferences (user) where each kind of alert goes.
+func GetAlertPreferences(svc services.NotificationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.GetAlertPreferences(c.Request.Context(), c.GetString("user_id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// UpdateAlertPreferences: PUT /notifications/preferences (user) change where some kinds of alert go.
+func UpdateAlertPreferences(svc services.NotificationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.UpdateAlertPreferencesRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.UpdateAlertPreferences(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

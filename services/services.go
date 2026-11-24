@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"errors"
 
 	"9itchi-notification-api/core"
 	"9itchi-notification-api/pkg/account"
+	"9itchi-notification-api/pkg/email"
 	"9itchi-notification-api/repositories"
 	"9itchi-notification-api/utils"
 )
@@ -20,11 +22,13 @@ type Services struct {
 // Clients holds one HTTP client per peer service (singletons, 50s timeout).
 type Clients struct {
 	Account *account.Client
+	Email   *email.Client
 }
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
 	realtime, tokens := core.NewRealtime(config.AblyAPIKey)
 	accountClient := account.New(config.AccountAPIURL, config.InternalAPIKey)
+	emailClient := email.New(config.EmailAPIURL, config.InternalAPIKey)
 	channels := core.NewChannelFactory()
 	channels.RegisterEmail(core.EmailConfig{
 		APIKey:        config.MailgunAPIKey,
@@ -40,8 +44,29 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		return u.Email, nil
 	})
 	return &Services{
-		Notification: NewNotificationService(repos.Notification, channels, realtime, tokens),
-		Consumer:     core.NewEventConsumer(config.RabbitMQURL, EventsQueue, HandledEvents),
-		Clients:      &Clients{Account: accountClient},
+		Notification: NewNotificationService(repos.Notification, channels, realtime, tokens, WithAlerts(AlertDeps{
+			Prefs:  repos.Preference,
+			Mailer: channels.Mailer(),
+			Users: func(ctx context.Context, userID string) (*Recipient, error) {
+				u, err := accountClient.GetUser(ctx, userID)
+				if err != nil {
+					return nil, err
+				}
+				return &Recipient{Email: u.Email, Name: u.Name, Language: u.Language}, nil
+			},
+			EmailContext: func(ctx context.Context, emailID string) (*EmailContext, error) {
+				c, err := emailClient.GetContext(ctx, emailID)
+				if errors.Is(err, email.ErrNotFound) {
+					return nil, nil
+				}
+				if err != nil {
+					return nil, err
+				}
+				return &EmailContext{ApplicationID: c.ApplicationID, JobID: c.JobID, JobTitle: c.JobTitle, Company: c.Company}, nil
+			},
+			FrontendURL: config.FrontendURL,
+		})),
+		Consumer: core.NewEventConsumer(config.RabbitMQURL, EventsQueue, HandledEvents),
+		Clients:  &Clients{Account: accountClient, Email: emailClient},
 	}
 }
