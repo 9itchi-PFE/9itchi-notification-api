@@ -37,6 +37,7 @@ var allowedTypes = map[string]bool{
 	"new_matching_jobs":    true,
 	"saved_job_closing":    true,
 	"cv_tip":               true,
+	"month_gifted":         true,
 	"admin_message":        true,
 	"system":               true,
 }
@@ -69,7 +70,7 @@ const EventsQueue = "notification-api.events"
 var HandledEvents = []string{
 	core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched,
 	core.EventPaymentCompleted, core.EventUserRegistered, core.EventSubscriptionRenewalDue,
-	core.EventJobClosingSoon, core.EventCVTips,
+	core.EventJobClosingSoon, core.EventCVTips, core.EventSubscriptionGifted,
 }
 
 type notificationService struct {
@@ -89,11 +90,13 @@ func NewNotificationService(repo repositories.NotificationRepository, channels c
 	s.events = map[string]func(ctx context.Context, payload map[string]any) error{
 		core.EventEmailOpened: s.fromEvent("email_opened", "Your email was opened", nil),
 		// A send the student clicked shows its result on the screen: only what the scheduler did is news.
-		core.EventEmailSent:              s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
-		core.EventEmailFailed:            s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
-		core.EventJobsMatched:            s.fromEvent("new_matching_jobs", "New jobs match your profile", hasCount),
-		core.EventJobClosingSoon:         s.fromEvent("saved_job_closing", "A saved offer closes soon", closesOnADay),
-		core.EventCVTips:                 s.fromEvent("cv_tip", "Your CV has points to correct", tipsACV),
+		core.EventEmailSent:      s.fromEvent("scheduled_email_sent", "Your scheduled email was sent", scheduledOnly),
+		core.EventEmailFailed:    s.fromEvent("email_failed", "Your email could not be sent", scheduledOnly),
+		core.EventJobsMatched:    s.fromEvent("new_matching_jobs", "New jobs match your profile", hasCount),
+		core.EventJobClosingSoon: s.fromEvent("saved_job_closing", "A saved offer closes soon", closesOnADay),
+		core.EventCVTips:         s.fromEvent("cv_tip", "Your CV has points to correct", tipsACV),
+		// A gift is not an alert to switch off: it is told in 9itchi and by email, whatever the settings say.
+		core.EventSubscriptionGifted:     s.fromEvent("month_gifted", "The team gave you a month", endsOnADay),
 		core.EventPaymentCompleted:       s.receiptEmail,
 		core.EventUserRegistered:         s.welcomeEmail,
 		core.EventSubscriptionRenewalDue: s.renewalEmail,

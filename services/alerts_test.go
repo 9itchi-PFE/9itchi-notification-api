@@ -296,7 +296,7 @@ func TestWithoutMailgunNoEmailLeavesAndNothingBreaks(t *testing.T) {
 func TestEmailCatalogIsComplete(t *testing.T) {
 	d := emailDetails{Name: "Ines", Company: "Acme", JobTitle: "Portail RH", Millimes: 30000, ReceiptNo: "2026-000123", LinkID: "pay-1", Count: 3}
 	d.Day = time.Date(2026, 12, 24, 9, 0, 0, 0, time.UTC)
-	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailMatches, emailClosing, emailTips, emailReceipt, emailWelcome, emailRenewalDue, emailRenewalLapsed} {
+	for _, kind := range []string{emailOpened, emailScheduledSent, emailFailed, emailMatches, emailClosing, emailTips, emailGift, emailReceipt, emailWelcome, emailRenewalDue, emailRenewalLapsed} {
 		for _, lang := range []string{"fr", "en", "ar"} {
 			for _, details := range []emailDetails{d, {Millimes: 30000, Day: d.Day, Count: 1, LinkID: "id-1"}} {
 				c, ok := writeEmail(kind, lang, "https://app.example", details)
@@ -470,4 +470,44 @@ func TestMatchesClosingAndTipsAlerts(t *testing.T) {
 		assert.Len(t, e.stored, 1, event)
 		assert.Len(t, e.mail.sent, wantMail, event)
 	}
+}
+
+func TestAGivenMonthIsToldInTheAppAndByEmail(t *testing.T) {
+	gift := func() map[string]any {
+		return map[string]any{"user_id": uid, "gift_id": "g-1", "plan_name": "Abonnement étudiant", "days": float64(30),
+			"ends_at": "2026-12-24T09:00:00Z", core.EventIDKey: "evt-gift"}
+	}
+	e := newAlertEnv()
+	// Every alert switched off: a gift is still told.
+	e.prefs.Rows = map[string]db.AlertPreference{}
+	for _, kind := range core.AlertKinds {
+		e.prefs.Rows[kind] = db.AlertPreference{Kind: kind}
+	}
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionGifted, gift()))
+	require.Len(t, e.stored, 1)
+	assert.Equal(t, "month_gifted", e.stored[0].Type)
+	assert.Equal(t, "2026-12-24T09:00:00Z", e.stored[0].Data["ends_at"])
+	assert.NotContains(t, e.stored[0].Data, "user_id")
+	require.Len(t, e.mail.sent, 1)
+	assert.Equal(t, "Un mois offert par l’équipe 9itchi", e.mail.sent[0].subject)
+	assert.Contains(t, e.mail.sent[0].text, "jusqu’au 24 décembre 2026")
+	assert.Contains(t, e.mail.sent[0].text, "https://app.example/settings/billing")
+
+	e = newAlertEnv()
+	e.user.Language = "ar"
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionGifted, gift()))
+	require.Len(t, e.mail.sent, 1)
+	assert.Contains(t, e.mail.sent[0].text, "24 ديسمبر 2026")
+
+	e = newAlertEnv()
+	bad := gift()
+	delete(bad, "ends_at")
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionGifted, bad))
+	assert.Empty(t, e.stored, "a gift that does not say until when is not told")
+	assert.Empty(t, e.mail.sent)
+
+	e = newAlertEnv()
+	e.repo.CreateFn = func(context.Context, *db.Notification) (*db.Notification, error) { return nil, errors.New("db down") }
+	assert.Error(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionGifted, gift()), "worth one more delivery")
+	assert.Empty(t, e.mail.sent)
 }
