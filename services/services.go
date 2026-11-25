@@ -13,6 +13,8 @@ import (
 
 // Services holds service implementations and the peer clients they call.
 type Services struct {
+	// Erase removes what this service keeps about a deleted account.
+	Erase        EraseService
 	Notification NotificationService
 	// Consumer delivers the events of the other services to Notification.HandleEvent (no-op without RABBITMQ_URL).
 	Consumer core.EventConsumer
@@ -44,6 +46,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		return u.Email, nil
 	})
 	return &Services{
+		Erase: NewEraseService(repos.Erase),
 		Notification: NewNotificationService(repos.Notification, channels, realtime, tokens, WithAlerts(AlertDeps{
 			Prefs:  repos.Preference,
 			Mailer: channels.Mailer(),
