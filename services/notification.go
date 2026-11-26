@@ -70,7 +70,7 @@ const EventsQueue = "notification-api.events"
 var HandledEvents = []string{
 	core.EventEmailOpened, core.EventEmailSent, core.EventEmailFailed, core.EventJobsMatched,
 	core.EventPaymentCompleted, core.EventUserRegistered, core.EventSubscriptionRenewalDue,
-	core.EventJobClosingSoon, core.EventCVTips, core.EventSubscriptionGifted,
+	core.EventJobClosingSoon, core.EventCVTips, core.EventSubscriptionGifted, core.EventSupportReplied,
 }
 
 type notificationService struct {
@@ -100,6 +100,8 @@ func NewNotificationService(repo repositories.NotificationRepository, channels c
 		core.EventPaymentCompleted:       s.receiptEmail,
 		core.EventUserRegistered:         s.welcomeEmail,
 		core.EventSubscriptionRenewalDue: s.renewalEmail,
+		// The support chat has its own unread badge: the reply is told by email only.
+		core.EventSupportReplied: s.supportEmail,
 	}
 	return s
 }

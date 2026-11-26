@@ -511,3 +511,28 @@ func TestAGivenMonthIsToldInTheAppAndByEmail(t *testing.T) {
 	assert.Error(t, e.svc.HandleEvent(context.Background(), core.EventSubscriptionGifted, gift()), "worth one more delivery")
 	assert.Empty(t, e.mail.sent)
 }
+
+func TestSupportReplyEmail(t *testing.T) {
+	e := newAlertEnv()
+	// A reply of the team is not an alert: it leaves even with every alert switched off.
+	e.prefs.Rows = map[string]db.AlertPreference{core.AlertApplications: {Kind: core.AlertApplications}}
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSupportReplied, map[string]any{"user_id": uid, "unread": float64(1)}))
+	assert.Empty(t, e.stored, "the chat has its own badge: no notification is stored")
+	require.Len(t, e.mail.sent, 1)
+	m := e.mail.sent[0]
+	assert.Equal(t, "L’équipe 9itchi t’a répondu", m.subject)
+	assert.Contains(t, m.text, "un nouveau message")
+	assert.Contains(t, m.html, `href="https://app.example/support"`)
+
+	e = newAlertEnv()
+	e.user.Language = "en"
+	require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSupportReplied, map[string]any{"user_id": uid, "unread": float64(3)}))
+	assert.Contains(t, e.mail.sent[0].text, "3 new messages")
+
+	t.Run("an event without a user or without an unread message sends nothing", func(t *testing.T) {
+		e := newAlertEnv()
+		require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSupportReplied, map[string]any{"user_id": "x", "unread": float64(1)}))
+		require.NoError(t, e.svc.HandleEvent(context.Background(), core.EventSupportReplied, map[string]any{"user_id": uid, "unread": float64(0)}))
+		assert.Empty(t, e.mail.sent)
+	})
+}

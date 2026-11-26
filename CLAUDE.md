@@ -18,14 +18,14 @@ Consumes events, stores in-app notifications (Postgres), pushes them live over A
 ## Data, peers, events
 - Tables: `notifications` (unique partial `event_id` = dedup), `alert_preferences`. Latest `0005_month_gifted.sql`. `notifications_type_check` constraint: a new notification type needs a migration.
 - Peers: account `GetUser` (email, name, language), email `GetContext` (application, job title/company).
-- Consumes (queue `notification-api.events`): `email.opened`, `email.sent` + `email.failed` (scheduled only), `jobs.matched`, `job.closing_soon`, `cv.tips`, `subscription.gifted`, `payment.completed` (receipt), `user.registered` (welcome), `subscription.renewal_due` (`due` | `lapsed`).
+- Consumes (queue `notification-api.events`): `email.opened`, `email.sent` + `email.failed` (scheduled only), `jobs.matched`, `job.closing_soon`, `cv.tips`, `subscription.gifted`, `payment.completed` (receipt), `user.registered` (welcome), `subscription.renewal_due` (`due` | `lapsed`), `support.replied` (chat-api: `{user_id, conversation_id, unread}`, email only).
 - Providers: `core.Realtime` = Ably if `ABLY_API_KEY` else no-op; `ChannelFactory`: `in_app` always, email (Mailgun) only if `MAILGUN_API_KEY` + `MAILGUN_DOMAIN`.
 - Env: `RABBITMQ_URL`, `ABLY_API_KEY`, `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM_EMAIL`, `MAILGUN_API_BASE` (empty = US, EU `https://api.eu.mailgun.net`), `MAILGUN_RATE_LIMIT` (10/s), `ACCOUNT_API_URL`, `EMAIL_API_URL`, `FRONTEND_URL`.
 
 ## Domain rules
 - Alert kinds `applications`, `matches`, `closing`, `tips`, each with `email` + `in_app` toggles; all on by default except `tips` email.
 - Type to kind: `email_opened`, `scheduled_email_sent` -> applications; `new_matching_jobs` -> matches; `saved_job_closing` -> closing; `cv_tip` -> tips.
-- Always sent, ignoring prefs: `month_gifted`, scheduled `email_failed`, welcome, receipt, renewal reminder (no auto-charge).
+- Always sent, ignoring prefs: `month_gifted`, scheduled `email_failed`, welcome, receipt, renewal reminder (no auto-charge), support reply (email only, no stored notification: the chat has its badge; never the message text).
 - Email templates fr/en/ar, fallback fr, ar is RTL with localized month names.
 - Ably token: subscribe-only on `user:{id}`, TTL 30 min. Ably failure never blocks the stored row.
 - Pending: first real Mailgun send, real Ably check, Arabic proofreading.
