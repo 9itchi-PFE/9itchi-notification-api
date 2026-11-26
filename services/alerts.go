@@ -319,3 +319,17 @@ func (s *notificationService) renewalEmail(ctx context.Context, payload map[stri
 	s.mail(ctx, userID, kind, emailDetails{Millimes: int64(price), Day: day})
 	return nil
 }
+
+// supportEmail tells a student by email that the team answered in the support chat. It is not an alert to switch
+// off: the student asked a question. The message itself is never in the email (nor in the event), only how many
+// wait. chat-api sends the event once per unread streak.
+func (s *notificationService) supportEmail(ctx context.Context, payload map[string]any) error {
+	userID, _ := payload["user_id"].(string)
+	unread, _ := payload["unread"].(float64) // JSON numbers
+	if !uuidRe.MatchString(userID) || unread < 1 {
+		utils.Logger.Warn("event ignored: support reply without a user or an unread message")
+		return nil
+	}
+	s.mail(ctx, userID, emailSupportReply, emailDetails{Count: int(unread)})
+	return nil
+}

@@ -23,6 +23,7 @@ const (
 	emailWelcome       = "welcome"
 	emailRenewalDue    = "renewal_due"
 	emailRenewalLapsed = "renewal_lapsed"
+	emailSupportReply  = "support_reply"
 )
 
 // emailWords are the words of one kind of email in one language. The With* forms are used when the company or the
@@ -139,6 +140,20 @@ var emailCatalog = map[string]map[string]emailWords{
 		"ar": {Category: "الاشتراك", Subject: "شهر هدية من فريق 9itchi",
 			Text:   "يهديك فريق 9itchi شهرًا: اشتراكك يمتد الآن حتى {date}. لا شيء عليك دفعه.",
 			Button: "عرض اشتراكي", path: "/settings/billing"},
+	},
+	emailSupportReply: {
+		"fr": {Category: "Aide", Subject: "L’équipe 9itchi t’a répondu", SubjectOne: "L’équipe 9itchi t’a répondu",
+			Text:    "Tu as {count} nouveaux messages de l’équipe 9itchi dans ton chat d’aide.",
+			TextOne: "Tu as un nouveau message de l’équipe 9itchi dans ton chat d’aide.",
+			Button:  "Lire la réponse", path: "/support"},
+		"en": {Category: "Help", Subject: "The 9itchi team replied", SubjectOne: "The 9itchi team replied",
+			Text:    "You have {count} new messages from the 9itchi team in your help chat.",
+			TextOne: "You have a new message from the 9itchi team in your help chat.",
+			Button:  "Read the reply", path: "/support"},
+		"ar": {Category: "المساعدة", Subject: "ردّ عليك فريق 9itchi", SubjectOne: "ردّ عليك فريق 9itchi",
+			Text:    "لديك رسائل جديدة من فريق 9itchi في محادثة المساعدة (العدد: {count}).",
+			TextOne: "لديك رسالة جديدة من فريق 9itchi في محادثة المساعدة.",
+			Button:  "قراءة الرد", path: "/support"},
 	},
 	emailReceipt: {
 		"fr": {Category: "Paiement", Subject: "Ton reçu 9itchi · {amount} TND",

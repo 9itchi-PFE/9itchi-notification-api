@@ -25,6 +25,9 @@ const (
 	EventCVTips = "cv.tips"
 	// EventSubscriptionGifted: the team gave a student free days of a plan (payments-api); ends_at is the new end.
 	EventSubscriptionGifted = "subscription.gifted"
+	// EventSupportReplied: the 9itchi team answered a student in the support chat and the student has not read it
+	// yet (chat-api, once per unread streak); unread is how many team messages wait.
+	EventSupportReplied = "support.replied"
 )
 
 // Publisher sends domain events. Swap LogPublisher for a RabbitMQ implementation without touching services.
