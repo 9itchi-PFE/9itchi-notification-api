@@ -26,6 +26,6 @@ Consumes events, stores in-app notifications (Postgres), pushes them live over A
 - Alert kinds `applications`, `matches`, `closing`, `tips`, each with `email` + `in_app` toggles; all on by default except `tips` email.
 - Type to kind: `email_opened`, `scheduled_email_sent` -> applications; `new_matching_jobs` -> matches; `saved_job_closing` -> closing; `cv_tip` -> tips.
 - Always sent, ignoring prefs: `month_gifted`, scheduled `email_failed`, welcome, receipt, renewal reminder (no auto-charge), support reply (email only, no stored notification: the chat has its badge; never the message text).
-- Email templates fr/en/ar, fallback fr, ar is RTL with localized month names.
+- Email templates fr/en/ar, fallback fr, ar is RTL with localized month names. One layout (`core.RenderEmail`) in the app's look: Bricolage Grotesque headings, Inter text, ink card shadow, lime logo. The `email_opened` email adds a summary card (company, offer, opened time in Tunis) from `email-api` context + event `opened_at`.
 - Ably token: subscribe-only on `user:{id}`, TTL 30 min. Ably failure never blocks the stored row.
 - Pending: first real Mailgun send, real Ably check, Arabic proofreading.

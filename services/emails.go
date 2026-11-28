@@ -204,6 +204,14 @@ var emailCatalog = map[string]map[string]emailWords{
 	},
 }
 
+// openedRows label the summary card of an opened application: the company, the offer and when it was opened. At
+// is the word between the day and the hour.
+var openedRows = map[string]struct{ Company, Offer, Opened, At string }{
+	"fr": {"Entreprise", "Offre", "Ouverte le", "à"},
+	"en": {"Company", "Offer", "Opened on", "at"},
+	"ar": {"الشركة", "العرض", "فُتح يوم", "على الساعة"},
+}
+
 // emailLanguage returns a language the catalog has: the user's, else French.
 func emailLanguage(lang string) string {
 	if _, ok := emailFooters[lang]; ok {
@@ -226,6 +234,8 @@ type emailDetails struct {
 	Day time.Time
 	// Count is how many offers are new, or how many points of a CV are left to correct.
 	Count int
+	// OpenedAt is when a recruiter opened the application (email_opened); written in Tunis time.
+	OpenedAt time.Time
 }
 
 // writeEmail builds the email of a kind in a language. ok is false for a kind the catalog does not have.
@@ -265,11 +275,36 @@ func writeEmail(kind, lang, frontendURL string, d emailDetails) (c core.EmailCon
 	base := strings.TrimRight(frontendURL, "/")
 	url := base + strings.ReplaceAll(w.path, "{id}", d.LinkID)
 	footer := emailFooters[lang]
+	var rows []core.EmailRow
+	if kind == emailOpened {
+		rows = openedSummary(lang, d)
+	}
 	return core.EmailContent{
-		Lang: lang, Subject: fill.Replace(subject), Category: w.Category, Text: fill.Replace(text),
+		Lang: lang, Subject: fill.Replace(subject), Category: w.Category, Text: fill.Replace(text), Rows: rows,
 		Button: w.Button, URL: url,
 		Footer: footer.Text, FooterLink: footer.Link, FooterURL: base + "/settings/alerts",
 	}, true
+}
+
+// openedSummary is the card of an opened application: only what is known is shown.
+func openedSummary(lang string, d emailDetails) []core.EmailRow {
+	l := openedRows[lang]
+	var rows []core.EmailRow
+	if d.Company != "" {
+		rows = append(rows, core.EmailRow{Label: l.Company, Value: d.Company})
+	}
+	if d.JobTitle != "" {
+		rows = append(rows, core.EmailRow{Label: l.Offer, Value: d.JobTitle})
+	}
+	if !d.OpenedAt.IsZero() {
+		hour := d.OpenedAt.In(tunis).Format("15:04")
+		if lang == "ar" {
+			// A time reads left to right; isolated so the Arabic text does not reorder it.
+			hour = "\u2066" + hour + "\u2069"
+		}
+		rows = append(rows, core.EmailRow{Label: l.Opened, Value: longDate(d.OpenedAt, lang) + " " + l.At + " " + hour})
+	}
+	return rows
 }
 
 // tnd writes millimes as dinars with three decimals, with the decimal sign of the language: 30,000 in French,

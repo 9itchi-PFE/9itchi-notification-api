@@ -65,7 +65,7 @@ func newAlertEnv() *alertEnv {
 }
 
 func opened() map[string]any {
-	return map[string]any{"user_id": uid, "email_id": "mail-1", core.EventIDKey: "evt-1"}
+	return map[string]any{"user_id": uid, "email_id": "mail-1", "opened_at": "2026-11-28T13:05:09.123Z", core.EventIDKey: "evt-1"}
 }
 
 func TestOpenedApplicationIsToldInTheAppAndByEmail(t *testing.T) {
@@ -85,6 +85,20 @@ func TestOpenedApplicationIsToldInTheAppAndByEmail(t *testing.T) {
 	assert.Contains(t, m.text, "« Portail RH »")
 	assert.Contains(t, m.html, `href="https://app.example/applications"`)
 	assert.Contains(t, m.html, `href="https://app.example/settings/alerts"`)
+	// The summary card names the company, the offer and when it was opened, in Tunis time.
+	assert.Contains(t, m.text, "Entreprise : Acme")
+	assert.Contains(t, m.text, "Offre : Portail RH")
+	assert.Contains(t, m.text, "Ouverte le : 28 novembre 2026 à 14:05")
+	assert.Contains(t, m.html, ">28 novembre 2026 à 14:05</td>")
+}
+
+func TestOpenedEmailWithoutDetailsHasNoSummaryCard(t *testing.T) {
+	c, ok := writeEmail(emailOpened, "en", "https://app.example", emailDetails{})
+	require.True(t, ok)
+	assert.Empty(t, c.Rows)
+
+	c, _ = writeEmail(emailOpened, "en", "https://app.example", emailDetails{Company: "Acme", OpenedAt: time.Date(2026, 11, 28, 23, 30, 0, 0, time.UTC)})
+	assert.Equal(t, []core.EmailRow{{Label: "Company", Value: "Acme"}, {Label: "Opened on", Value: "29 November 2026 at 00:30"}}, c.Rows, "the day of Tunis")
 }
 
 func TestEmailIsWrittenInTheLanguageOfTheUser(t *testing.T) {
