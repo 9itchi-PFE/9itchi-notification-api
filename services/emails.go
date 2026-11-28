@@ -300,7 +300,7 @@ func openedSummary(lang string, d emailDetails) []core.EmailRow {
 		hour := d.OpenedAt.In(tunis).Format("15:04")
 		if lang == "ar" {
 			// A time reads left to right; isolated so the Arabic text does not reorder it.
-			hour = "⁦" + hour + "⁩"
+			hour = "\u2066" + hour + "\u2069"
 		}
 		rows = append(rows, core.EmailRow{Label: l.Opened, Value: longDate(d.OpenedAt, lang) + " " + l.At + " " + hour})
 	}
