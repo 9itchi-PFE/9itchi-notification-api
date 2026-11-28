@@ -107,6 +107,9 @@ func detailsOf(notifType string, data map[string]any) emailDetails {
 		d.Day, _ = time.Parse(time.DateOnly, day)
 	case emailTips:
 		d.LinkID, _ = data["resume_id"].(string)
+	case emailOpened:
+		at, _ := data["opened_at"].(string)
+		d.OpenedAt, _ = time.Parse(time.RFC3339, at)
 	case emailGift:
 		endsAt, _ := data["ends_at"].(string)
 		d.Day, _ = time.Parse(time.RFC3339, endsAt)

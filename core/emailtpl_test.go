@@ -30,6 +30,18 @@ func TestRenderEmail(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(html, "display:inline-block;height:40px"), "one button")
 }
 
+func TestRenderEmailSummaryCard(t *testing.T) {
+	text, html := RenderEmail(EmailContent{Lang: "fr", Subject: "S", Text: "T", Rows: []EmailRow{{"Entreprise", "Acme"}, {"Offre", "<b>RH</b>"}}})
+	assert.Contains(t, text, "\n\nEntreprise : Acme\nOffre : <b>RH</b>")
+	assert.Contains(t, html, ">Entreprise</td>")
+	assert.Contains(t, html, "&lt;b&gt;RH&lt;/b&gt;", "a value is escaped")
+	assert.Contains(t, html, "Bricolage Grotesque", "the heading uses the display font of the app")
+	assert.Contains(t, html, "box-shadow:5px 5px 0 #101218", "the card shadow of the app")
+
+	_, html = RenderEmail(EmailContent{Lang: "fr", Subject: "S", Text: "T"})
+	assert.NotContains(t, html, "#F7F8FA", "no card without rows")
+}
+
 func TestRenderEmailEscapesWhatAUserTyped(t *testing.T) {
 	_, html := RenderEmail(EmailContent{
 		Lang: "en", Subject: `<script>alert(1)</script> opened your application`, Category: `"><b>`,
